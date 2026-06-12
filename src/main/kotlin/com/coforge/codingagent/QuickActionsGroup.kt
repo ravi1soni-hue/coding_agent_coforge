@@ -26,7 +26,7 @@ class QuickActionsGroup : ActionGroup(), DumbAware {
         val info = project?.let { ProjectTypeDetector.detect(it) }
         val isFlutter = info?.type == ProjectTypeDetector.ProjectType.FLUTTER
 
-        val common = arrayOf(
+        val common: Array<AnAction> = arrayOf(
             quick("Explain Selected Code",        "explain this code in detail, including how it works and why:\n\n"),
             quick("Find & Fix Issues",             "identify and fix all bugs, edge cases, and issues in:\n\n"),
             quick("Refactor for Clarity",          "refactor this code for readability, maintainability, and best practices:\n\n"),
@@ -47,7 +47,7 @@ class QuickActionsGroup : ActionGroup(), DumbAware {
         return common + platformSpecific
     }
 
-    private fun quick(label: String, prefix: String) = object : AnAction(label), DumbAware {
+    private fun quick(label: String, prefix: String): AnAction = object : AnAction(label), DumbAware {
         override fun getActionUpdateThread() = ActionUpdateThread.EDT
         override fun actionPerformed(e: AnActionEvent) {
             val project = e.project ?: return

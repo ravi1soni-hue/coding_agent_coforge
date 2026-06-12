@@ -1,7 +1,6 @@
 package com.coforge.codingagent
 
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.options.ShowSettingsUtil
@@ -12,7 +11,6 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
@@ -24,7 +22,6 @@ import java.awt.geom.RoundRectangle2D
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.file.Paths
 import java.util.Base64
 import java.util.regex.Pattern
 import javax.imageio.ImageIO
@@ -355,16 +352,19 @@ class ChatToolWindowContent(private val project: Project) {
 
     private fun showFilePicker() {
         val files = EditorContext.getAllProjectFiles(project)
-        val list = JBList(files.map { it.name })
+        val names = files.map { it.name }
         JBPopupFactory.getInstance()
-            .createListPopupBuilder(list).setTitle("Tag a file")
-            .setItemChoosenCallback {
-                val f = files.find { it.name == list.selectedValue } ?: return@setItemChoosenCallback
+            .createPopupChooserBuilder(names)
+            .setTitle("Tag a file")
+            .setItemChosenCallback { name ->
+                val f = files.find { it.name == name } ?: return@setItemChosenCallback
                 addTagPill(f)
-                val t = inputArea.text; val at = t.lastIndexOf('@')
+                val t = inputArea.text
+                val at = t.lastIndexOf('@')
                 if (at >= 0) inputArea.text = t.substring(0, at)
             }
-            .createPopup().showInBestPositionFor(inputArea)
+            .createPopup()
+            .showUnderneathOf(inputArea)
     }
 
     private fun addTagPill(file: VirtualFile) {
@@ -743,11 +743,6 @@ class ChatToolWindowContent(private val project: Project) {
         }
     }
 
-    private fun applyChange(path: String, code: String, isNew: Boolean) {
-        applyChangeInternal(path, code, isNew)
-        Messages.showInfoMessage(project, "Applied → $path", "Done")
-    }
-
     // Called both from single-file apply and "Apply All" batch (already inside WriteCommandAction)
     private fun applyChangeInternal(path: String, code: String, isNew: Boolean) {
         try {
@@ -849,10 +844,11 @@ class ChatToolWindowContent(private val project: Project) {
         }
         panel.add(JBScrollPane(list).apply { border = BorderFactory.createEtchedBorder() }, BorderLayout.CENTER)
 
-        val result = Messages.showOkCancelDialog(
-            panel, "Apply Changes", "Apply Checked", "Cancel", Messages.getQuestionIcon()
+        val result = JOptionPane.showConfirmDialog(
+            contentPanel, panel, "Apply Changes",
+            JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE
         )
-        if (result == Messages.OK) {
+        if (result == JOptionPane.OK_OPTION) {
             val selected = changes.filterIndexed { i, _ -> checks[i].isSelected }
             WriteCommandAction.runWriteCommandAction(project) {
                 selected.forEach { change -> applyChangeInternal(change.path, change.content, change.isNew) }
