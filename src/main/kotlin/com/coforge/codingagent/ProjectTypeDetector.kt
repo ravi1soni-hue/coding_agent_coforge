@@ -19,7 +19,9 @@ object ProjectTypeDetector {
         val mainLanguage: String
     )
 
-    private val cache = mutableMapOf<String, ProjectInfo>()
+    private val cache = object : LinkedHashMap<String, ProjectInfo>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ProjectInfo>) = size > 10
+    }
 
     fun detect(project: Project): ProjectInfo {
         val base = project.basePath ?: return unknown()

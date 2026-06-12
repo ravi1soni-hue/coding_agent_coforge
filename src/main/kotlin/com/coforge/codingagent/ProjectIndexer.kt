@@ -37,7 +37,10 @@ object ProjectIndexer {
         val content: String
     )
 
-    private val cache = mutableMapOf<String, List<FileEntry>>()
+    // LRU cache capped at 5 projects — prevents unbounded growth in multi-project IDE sessions
+    private val cache = object : LinkedHashMap<String, List<FileEntry>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<FileEntry>>) = size > 5
+    }
 
     // Language-specific symbol extractors
     private val KT_SYMBOLS = Regex(

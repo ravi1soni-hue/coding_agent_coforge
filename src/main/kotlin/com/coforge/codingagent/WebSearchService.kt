@@ -34,15 +34,18 @@ object WebSearchService {
             .connectTimeout(Duration.ofSeconds(15))
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .build()
+            .also { c -> Runtime.getRuntime().addShutdownHook(Thread { c.close() }) }
     }
+
+    // Thread-safe user agent rotation
+    private val uaIndexAtomic = java.util.concurrent.atomic.AtomicInteger(0)
 
     private val userAgents = listOf(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
-    private var uaIndex = 0
-    private fun nextUserAgent() = userAgents[uaIndex++ % userAgents.size]
+    private fun nextUserAgent() = userAgents[uaIndexAtomic.getAndIncrement() % userAgents.size]
 
     // ─── Main entry point ─────────────────────────────────────────────────────
 

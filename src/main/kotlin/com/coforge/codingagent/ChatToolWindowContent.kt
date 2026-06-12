@@ -518,6 +518,8 @@ class ChatToolWindowContent(private val project: Project) {
         }
         intentLabel.isVisible = true
 
+        // Keep history bounded — older messages are still summarized in the context window
+        if (conversationHistory.size >= 100) conversationHistory.subList(0, 40).clear()
         conversationHistory.add(Message("user", text + if (imageCount > 0) " [+$imageCount image(s)]" else ""))
         appendBubble("You", text, imageCount = imageCount)
 
@@ -629,7 +631,7 @@ class ChatToolWindowContent(private val project: Project) {
             add(createTextBtn("Retry") {
                 val lastUser = conversationHistory.lastOrNull { it.role == "user" }?.content ?: return@createTextBtn
                 conversationHistory.removeLastOrNull(); conversationHistory.removeLastOrNull()
-                inputArea.text = lastUser.removeSuffix(Regex(" \\[\\+\\d+ image\\(s\\)\\]").find(lastUser)?.value ?: "")
+                inputArea.text = lastUser.removeSuffix(RE_IMAGE_SUFFIX.find(lastUser)?.value ?: "")
                 sendMessage()
             })
         }
@@ -735,7 +737,8 @@ class ChatToolWindowContent(private val project: Project) {
     // ─── Diff & apply ─────────────────────────────────────────────────────────
 
     private fun showDiffAndApply(path: String, newCode: String, isNew: Boolean) {
-        val oldContent = if (isNew) "" else try { File("${project.basePath}/$path").readText() } catch (_: Exception) { "" }
+        val base = project.basePath ?: return
+        val oldContent = if (isNew) "" else try { File("$base/$path").readText() } catch (_: Exception) { "" }
         val dialog = DiffPreviewDialog(project, path, oldContent, newCode, isNew)
         if (dialog.showAndGet()) {
             WriteCommandAction.runWriteCommandAction(project) { applyChangeInternal(path, newCode, isNew) }
@@ -745,8 +748,12 @@ class ChatToolWindowContent(private val project: Project) {
 
     // Called both from single-file apply and "Apply All" batch (already inside WriteCommandAction)
     private fun applyChangeInternal(path: String, code: String, isNew: Boolean) {
+        val base = project.basePath ?: run {
+            Messages.showErrorDialog(project, "Project base path is not set.", "Error")
+            return
+        }
         try {
-            val file = File("${project.basePath}/$path")
+            val file = File("$base/$path")
             if (isNew) {
                 file.parentFile?.mkdirs()
                 FileUtil.writeToFile(file, code)
@@ -780,14 +787,12 @@ class ChatToolWindowContent(private val project: Project) {
 
     private fun parseAllFileChanges(response: String): List<FileChange> {
         val changes = mutableListOf<FileChange>()
-        Regex("""<file_change\s+path="([^"]+)">([\s\S]*?)</file_change>""")
-            .findAll(response).forEach { m ->
-                changes.add(FileChange(m.groupValues[1].trim(), m.groupValues[2].trim(), false))
-            }
-        Regex("""<new_file\s+path="([^"]+)">([\s\S]*?)</new_file>""")
-            .findAll(response).forEach { m ->
-                changes.add(FileChange(m.groupValues[1].trim(), m.groupValues[2].trim(), true))
-            }
+        RE_FILE_CHANGE.findAll(response).forEach { m ->
+            changes.add(FileChange(m.groupValues[1].trim(), m.groupValues[2].trim(), false))
+        }
+        RE_NEW_FILE.findAll(response).forEach { m ->
+            changes.add(FileChange(m.groupValues[1].trim(), m.groupValues[2].trim(), true))
+        }
         return changes
     }
 
@@ -888,5 +893,10 @@ class ChatToolWindowContent(private val project: Project) {
         val BG_SURFACE  = Color(33, 38, 45)
         val BG_BORDER   = Color(48, 54, 61)
         val ACCENT_BLUE = Color(88, 166, 255)
+
+        // Compiled once — not on every keystroke / message
+        val RE_IMAGE_SUFFIX  = Regex(""" \[\+\d+ image\(s\)\]""")
+        val RE_FILE_CHANGE   = Regex("""<file_change\s+path="([^"]+)">([\s\S]*?)</file_change>""")
+        val RE_NEW_FILE      = Regex("""<new_file\s+path="([^"]+)">([\s\S]*?)</new_file>""")
     }
 }
