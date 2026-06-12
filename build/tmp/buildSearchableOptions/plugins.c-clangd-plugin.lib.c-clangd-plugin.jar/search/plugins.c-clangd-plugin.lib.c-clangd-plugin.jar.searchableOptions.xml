@@ -1,0 +1,120 @@
+<options>
+  <configurable id="preferences.keymap" configurable_name="Keymap">
+    <option name="clangd" path="ActionManager" hit="Show Clangd Tool Window" />
+    <option name="show" path="ActionManager" hit="Show Clangd Tool Window" />
+    <option name="tool" path="ActionManager" hit="Show Clangd Tool Window" />
+    <option name="window" path="ActionManager" hit="Show Clangd Tool Window" />
+    <option name="clangd" path="ActionManager" hit="clangd: Crash server" />
+    <option name="crash" path="ActionManager" hit="clangd: Crash server" />
+    <option name="server" path="ActionManager" hit="clangd: Crash server" />
+    <option name="clangd" path="ActionManager" hit="clangd: Dump stacktraces" />
+    <option name="dump" path="ActionManager" hit="clangd: Dump stacktraces" />
+    <option name="stacktraces" path="ActionManager" hit="clangd: Dump stacktraces" />
+    <option name="and" path="ActionManager" hit="clangd: Preprocess and obfuscate current TU" />
+    <option name="clangd" path="ActionManager" hit="clangd: Preprocess and obfuscate current TU" />
+    <option name="current" path="ActionManager" hit="clangd: Preprocess and obfuscate current TU" />
+    <option name="obfuscate" path="ActionManager" hit="clangd: Preprocess and obfuscate current TU" />
+    <option name="preprocess" path="ActionManager" hit="clangd: Preprocess and obfuscate current TU" />
+    <option name="tu" path="ActionManager" hit="clangd: Preprocess and obfuscate current TU" />
+    <option name="clangd" path="ActionManager" hit="clangd: Preprocess current TU" />
+    <option name="current" path="ActionManager" hit="clangd: Preprocess current TU" />
+    <option name="preprocess" path="ActionManager" hit="clangd: Preprocess current TU" />
+    <option name="tu" path="ActionManager" hit="clangd: Preprocess current TU" />
+    <option name="bug" path="ActionManager" hit="clangd: Report bug" />
+    <option name="clangd" path="ActionManager" hit="clangd: Report bug" />
+    <option name="report" path="ActionManager" hit="clangd: Report bug" />
+    <option name="bug" path="ActionManager" hit="clangd: Report indexer bug" />
+    <option name="clangd" path="ActionManager" hit="clangd: Report indexer bug" />
+    <option name="indexer" path="ActionManager" hit="clangd: Report indexer bug" />
+    <option name="report" path="ActionManager" hit="clangd: Report indexer bug" />
+    <option name="clangd" path="ActionManager" hit="clangd: set in/out/errors filters" />
+    <option name="errors" path="ActionManager" hit="clangd: set in/out/errors filters" />
+    <option name="filters" path="ActionManager" hit="clangd: set in/out/errors filters" />
+    <option name="in" path="ActionManager" hit="clangd: set in/out/errors filters" />
+    <option name="out" path="ActionManager" hit="clangd: set in/out/errors filters" />
+    <option name="set" path="ActionManager" hit="clangd: set in/out/errors filters" />
+  </configurable>
+  <configurable id="language.cpp.clangd" configurable_name="Clangd">
+    <option name="always" hit="Always show clangd completion results from inside namespaces" />
+    <option name="clangd" hit="Always show clangd completion results from inside namespaces" />
+    <option name="completion" hit="Always show clangd completion results from inside namespaces" />
+    <option name="from" hit="Always show clangd completion results from inside namespaces" />
+    <option name="inside" hit="Always show clangd completion results from inside namespaces" />
+    <option name="namespaces" hit="Always show clangd completion results from inside namespaces" />
+    <option name="results" hit="Always show clangd completion results from inside namespaces" />
+    <option name="show" hit="Always show clangd completion results from inside namespaces" />
+    <option name="built-in" hit="Built-in clangd version: checking..." />
+    <option name="checking" hit="Built-in clangd version: checking..." />
+    <option name="clangd" hit="Built-in clangd version: checking..." />
+    <option name="version" hit="Built-in clangd version: checking..." />
+    <option name="and" hit="Clang Errors and Warnings" />
+    <option name="clang" hit="Clang Errors and Warnings" />
+    <option name="errors" hit="Clang Errors and Warnings" />
+    <option name="warnings" hit="Clang Errors and Warnings" />
+    <option name="and" hit="Clang-Tidy and CLion Inspections" />
+    <option name="clang-tidy" hit="Clang-Tidy and CLion Inspections" />
+    <option name="clion" hit="Clang-Tidy and CLion Inspections" />
+    <option name="inspections" hit="Clang-Tidy and CLion Inspections" />
+    <option name="clangd" hit="Clangd" />
+    <option name="code" hit="Code Completion" />
+    <option name="completion" hit="Code Completion" />
+    <option name="navigation" hit="Navigation" />
+    <option name="info" hit="Parameter Info" />
+    <option name="parameter" hit="Parameter Info" />
+    <option name="and" hit="Show errors and warnings from clangd" />
+    <option name="clangd" hit="Show errors and warnings from clangd" />
+    <option name="errors" hit="Show errors and warnings from clangd" />
+    <option name="from" hit="Show errors and warnings from clangd" />
+    <option name="show" hit="Show errors and warnings from clangd" />
+    <option name="warnings" hit="Show errors and warnings from clangd" />
+    <option name="also" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="builtin" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="clang-tidy" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="clangd" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="clion" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="enables" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="inspections" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="some" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="use" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="via" hit="Use clang-tidy via clangd (also enables some CLion builtin inspections)" />
+    <option name="clangd" hit="Use code completion via clangd" />
+    <option name="code" hit="Use code completion via clangd" />
+    <option name="completion" hit="Use code completion via clangd" />
+    <option name="use" hit="Use code completion via clangd" />
+    <option name="via" hit="Use code completion via clangd" />
+    <option name="clangd" hit="Use navigation via clangd" />
+    <option name="navigation" hit="Use navigation via clangd" />
+    <option name="use" hit="Use navigation via clangd" />
+    <option name="via" hit="Use navigation via clangd" />
+    <option name="clangd" hit="Use parameter info via clangd" />
+    <option name="info" hit="Use parameter info via clangd" />
+    <option name="parameter" hit="Use parameter info via clangd" />
+    <option name="use" hit="Use parameter info via clangd" />
+    <option name="via" hit="Use parameter info via clangd" />
+  </configurable>
+  <configurable id="language.cpp.clang-tidy" configurable_name="Clang-Tidy">
+    <option name="built-in" hit="Built-in Clang-Tidy version: checking..." />
+    <option name="checking" hit="Built-in Clang-Tidy version: checking..." />
+    <option name="clang-tidy" hit="Built-in Clang-Tidy version: checking..." />
+    <option name="version" hit="Built-in Clang-Tidy version: checking..." />
+    <option name="clang-tidy" hit="Clang-Tidy" />
+    <option name="0" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="7" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="clang-tidy" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="higher" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="is" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="note" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="of" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="or" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="supported" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="version" hit="Note: Clang-Tidy of version 7.0.0 or higher is supported" />
+    <option name="built-in" hit="Use external Clang-Tidy instead of the built-in one:" />
+    <option name="clang-tidy" hit="Use external Clang-Tidy instead of the built-in one:" />
+    <option name="external" hit="Use external Clang-Tidy instead of the built-in one:" />
+    <option name="instead" hit="Use external Clang-Tidy instead of the built-in one:" />
+    <option name="of" hit="Use external Clang-Tidy instead of the built-in one:" />
+    <option name="one" hit="Use external Clang-Tidy instead of the built-in one:" />
+    <option name="the" hit="Use external Clang-Tidy instead of the built-in one:" />
+    <option name="use" hit="Use external Clang-Tidy instead of the built-in one:" />
+  </configurable>
+</options>

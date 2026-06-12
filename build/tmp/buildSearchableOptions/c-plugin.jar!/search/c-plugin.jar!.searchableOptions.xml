@@ -1,0 +1,76 @@
+<options>
+  <configurable id="fileTemplates" configurable_name="File and Code Templates">
+    <option name="body" hit="C++ Implemented Function Body" />
+    <option name="c++" hit="C++ Implemented Function Body" />
+    <option name="function" hit="C++ Implemented Function Body" />
+    <option name="implemented" hit="C++ Implemented Function Body" />
+    <option name="body" hit="C++ Overridden Function Body" />
+    <option name="c++" hit="C++ Overridden Function Body" />
+    <option name="function" hit="C++ Overridden Function Body" />
+    <option name="overridden" hit="C++ Overridden Function Body" />
+    <option name="body" hit="OC Implemented Method Body" />
+    <option name="implemented" hit="OC Implemented Method Body" />
+    <option name="method" hit="OC Implemented Method Body" />
+    <option name="oc" hit="OC Implemented Method Body" />
+    <option name="1" hit="OC Overridden CopyWithZone Body 1" />
+    <option name="body" hit="OC Overridden CopyWithZone Body 1" />
+    <option name="copywithzone" hit="OC Overridden CopyWithZone Body 1" />
+    <option name="oc" hit="OC Overridden CopyWithZone Body 1" />
+    <option name="overridden" hit="OC Overridden CopyWithZone Body 1" />
+    <option name="2" hit="OC Overridden CopyWithZone Body 2" />
+    <option name="body" hit="OC Overridden CopyWithZone Body 2" />
+    <option name="copywithzone" hit="OC Overridden CopyWithZone Body 2" />
+    <option name="oc" hit="OC Overridden CopyWithZone Body 2" />
+    <option name="overridden" hit="OC Overridden CopyWithZone Body 2" />
+    <option name="3" hit="OC Overridden CopyWithZone Body 3" />
+    <option name="body" hit="OC Overridden CopyWithZone Body 3" />
+    <option name="copywithzone" hit="OC Overridden CopyWithZone Body 3" />
+    <option name="oc" hit="OC Overridden CopyWithZone Body 3" />
+    <option name="overridden" hit="OC Overridden CopyWithZone Body 3" />
+    <option name="1" hit="OC Overridden Description Body 1" />
+    <option name="body" hit="OC Overridden Description Body 1" />
+    <option name="description" hit="OC Overridden Description Body 1" />
+    <option name="oc" hit="OC Overridden Description Body 1" />
+    <option name="overridden" hit="OC Overridden Description Body 1" />
+    <option name="2" hit="OC Overridden Description Body 2" />
+    <option name="body" hit="OC Overridden Description Body 2" />
+    <option name="description" hit="OC Overridden Description Body 2" />
+    <option name="oc" hit="OC Overridden Description Body 2" />
+    <option name="overridden" hit="OC Overridden Description Body 2" />
+    <option name="3" hit="OC Overridden Description Body 3" />
+    <option name="body" hit="OC Overridden Description Body 3" />
+    <option name="description" hit="OC Overridden Description Body 3" />
+    <option name="oc" hit="OC Overridden Description Body 3" />
+    <option name="overridden" hit="OC Overridden Description Body 3" />
+    <option name="body" hit="OC Overridden InitWith Method Body" />
+    <option name="initwith" hit="OC Overridden InitWith Method Body" />
+    <option name="method" hit="OC Overridden InitWith Method Body" />
+    <option name="oc" hit="OC Overridden InitWith Method Body" />
+    <option name="overridden" hit="OC Overridden InitWith Method Body" />
+    <option name="body" hit="OC Overridden IsEqual Method Body" />
+    <option name="isequal" hit="OC Overridden IsEqual Method Body" />
+    <option name="method" hit="OC Overridden IsEqual Method Body" />
+    <option name="oc" hit="OC Overridden IsEqual Method Body" />
+    <option name="overridden" hit="OC Overridden IsEqual Method Body" />
+    <option name="body" hit="OC Overridden Method Body" />
+    <option name="method" hit="OC Overridden Method Body" />
+    <option name="oc" hit="OC Overridden Method Body" />
+    <option name="overridden" hit="OC Overridden Method Body" />
+    <option name="body" hit="OC Property Getter Body" />
+    <option name="getter" hit="OC Property Getter Body" />
+    <option name="oc" hit="OC Property Getter Body" />
+    <option name="property" hit="OC Property Getter Body" />
+    <option name="body" hit="OC Property Setter Body" />
+    <option name="oc" hit="OC Property Setter Body" />
+    <option name="property" hit="OC Property Setter Body" />
+    <option name="setter" hit="OC Property Setter Body" />
+    <option name="header" hit="OC Shared Instance Header" />
+    <option name="instance" hit="OC Shared Instance Header" />
+    <option name="oc" hit="OC Shared Instance Header" />
+    <option name="shared" hit="OC Shared Instance Header" />
+    <option name="implementation" hit="OC Shared Instance Implementation" />
+    <option name="instance" hit="OC Shared Instance Implementation" />
+    <option name="oc" hit="OC Shared Instance Implementation" />
+    <option name="shared" hit="OC Shared Instance Implementation" />
+  </configurable>
+</options>

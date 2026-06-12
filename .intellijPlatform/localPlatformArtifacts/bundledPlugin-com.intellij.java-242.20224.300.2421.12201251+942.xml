@@ -1,0 +1,14 @@
+<ivy-module version="2.0">
+  <info organisation="bundledPlugin" module="com.intellij.java" revision="242.20224.300.2421.12201251+942"/>
+  <configurations>
+    <conf name="default" visibility="public"/>
+  </configurations>
+  <publications>
+    <artifact name="/Users/ravi.1.soni/.gradle/caches/9.0-milestone-1/transforms/258d6b02dc0f4f6d2d441bc07e4c74fe/transformed/android-studio-2024.2.1.1-mac_arm/plugins/java" type="directory" conf="default"/>
+  </publications>
+  <dependencies>
+    <dependency org="bundledPlugin" name="com.intellij.copyright" rev="242.20224.300.2421.12201251+303"/>
+    <dependency org="bundledPlugin" name="com.intellij.platform.images" rev="242.20224.300.2421.12201251+718"/>
+    <dependency org="bundledModule" name="com.jetbrains.performancePlugin" rev="242.20224.300.2421.12201251+178"/>
+  </dependencies>
+</ivy-module>

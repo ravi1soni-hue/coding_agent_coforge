@@ -1,0 +1,31 @@
+<options>
+  <configurable id="preferences.keymap" configurable_name="Keymap">
+    <option name="analyze" path="ActionManager" hit="Analyze Global Dataflow" />
+    <option name="dataflow" path="ActionManager" hit="Analyze Global Dataflow" />
+    <option name="global" path="ActionManager" hit="Analyze Global Dataflow" />
+    <option name="analyze" path="ActionManager" hit="Analyze Global Dataflow..." />
+    <option name="dataflow" path="ActionManager" hit="Analyze Global Dataflow..." />
+    <option name="global" path="ActionManager" hit="Analyze Global Dataflow..." />
+    <option name="clang-tidy" path="ActionManager" hit="Show Clang-Tidy Info" />
+    <option name="info" path="ActionManager" hit="Show Clang-Tidy Info" />
+    <option name="show" path="ActionManager" hit="Show Clang-Tidy Info" />
+    <option name="clazy" path="ActionManager" hit="Show Clazy Info" />
+    <option name="info" path="ActionManager" hit="Show Clazy Info" />
+    <option name="show" path="ActionManager" hit="Show Clazy Info" />
+    <option name="clangd" path="ActionManager" hit="clangd: XRef" />
+    <option name="xref" path="ActionManager" hit="clangd: XRef" />
+    <option name="clangd" path="ActionManager" hit="clangd: XRef current file" />
+    <option name="current" path="ActionManager" hit="clangd: XRef current file" />
+    <option name="file" path="ActionManager" hit="clangd: XRef current file" />
+    <option name="xref" path="ActionManager" hit="clangd: XRef current file" />
+    <option name="clangd" path="ActionManager" hit="clangd: code complete current file" />
+    <option name="code" path="ActionManager" hit="clangd: code complete current file" />
+    <option name="complete" path="ActionManager" hit="clangd: code complete current file" />
+    <option name="current" path="ActionManager" hit="clangd: code complete current file" />
+    <option name="file" path="ActionManager" hit="clangd: code complete current file" />
+    <option name="clangd" path="ActionManager" hit="clangd: collect parse stats" />
+    <option name="collect" path="ActionManager" hit="clangd: collect parse stats" />
+    <option name="parse" path="ActionManager" hit="clangd: collect parse stats" />
+    <option name="stats" path="ActionManager" hit="clangd: collect parse stats" />
+  </configurable>
+</options>

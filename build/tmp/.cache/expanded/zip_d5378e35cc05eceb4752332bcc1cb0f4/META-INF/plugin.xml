@@ -1,0 +1,18 @@
+<idea-plugin>
+  <idea-version since-build="232.8660" until-build="232.*" />
+  <version>1.0-SNAPSHOT</version>
+  <id>com.coforge.codingagent</id>
+  <name>Coforge AI Coding Agent</name>
+  <vendor email="support@coforge.com" url="https://www.coforge.com">Coforge</vendor>
+  <description><![CDATA[A custom AI Coding Agent for Android Studio by Coforge.]]></description>
+  <depends>com.intellij.modules.platform</depends>
+  <depends>org.jetbrains.kotlin</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <!-- Register the Tool Window -->
+    <toolWindow id="Coforge AI Agent" secondary="false" icon="AllIcons.Actions.Refresh" anchor="right" factoryClass="com.coforge.codingagent.ChatToolWindowFactory" />
+    <!-- Register Persistent State -->
+    <applicationService serviceImplementation="com.coforge.codingagent.AppSettingsState" />
+    <!-- Register Settings Page -->
+    <applicationConfigurable instance="com.coforge.codingagent.AppSettingsConfigurable" id="com.coforge.codingagent.AppSettingsConfigurable" displayName="Coforge AI Agent Settings" />
+  </extensions>
+</idea-plugin>

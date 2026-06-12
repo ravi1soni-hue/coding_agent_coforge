@@ -1,0 +1,21 @@
+<options>
+  <configurable id="preferences.keymap" configurable_name="Keymap">
+    <option name="psi" path="ActionManager" hit="Show PSI Structure..." />
+    <option name="show" path="ActionManager" hit="Show PSI Structure..." />
+    <option name="structure" path="ActionManager" hit="Show PSI Structure..." />
+    <option name="debugger" path="ActionManager" hit="Use Dialog For PSI Debugger" />
+    <option name="dialog" path="ActionManager" hit="Use Dialog For PSI Debugger" />
+    <option name="for" path="ActionManager" hit="Use Dialog For PSI Debugger" />
+    <option name="psi" path="ActionManager" hit="Use Dialog For PSI Debugger" />
+    <option name="use" path="ActionManager" hit="Use Dialog For PSI Debugger" />
+    <option name="current" path="ActionManager" hit="View PSI Structure of Current File..." />
+    <option name="file" path="ActionManager" hit="View PSI Structure of Current File..." />
+    <option name="of" path="ActionManager" hit="View PSI Structure of Current File..." />
+    <option name="psi" path="ActionManager" hit="View PSI Structure of Current File..." />
+    <option name="structure" path="ActionManager" hit="View PSI Structure of Current File..." />
+    <option name="view" path="ActionManager" hit="View PSI Structure of Current File..." />
+    <option name="psi" path="ActionManager" hit="View PSI Structure..." />
+    <option name="structure" path="ActionManager" hit="View PSI Structure..." />
+    <option name="view" path="ActionManager" hit="View PSI Structure..." />
+  </configurable>
+</options>

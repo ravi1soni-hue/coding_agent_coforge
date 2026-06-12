@@ -1,0 +1,7 @@
+<options>
+  <configurable id="fileTemplates" configurable_name="File and Code Templates">
+    <option name="c" hit="C File Header" />
+    <option name="file" hit="C File Header" />
+    <option name="header" hit="C File Header" />
+  </configurable>
+</options>
