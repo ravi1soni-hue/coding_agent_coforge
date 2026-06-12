@@ -267,7 +267,7 @@ class ChatToolWindowContent(private val project: Project) {
                     }
                     val right = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
                         isOpaque = false
-                        add(createIconBtn(AllIcons.Actions.Attach, "Attach image (or paste)") { openImagePicker() })
+                        add(createIconBtn(AllIcons.General.Add, "Attach image (or paste)") { openImagePicker() })
                         add(createIconBtn(AllIcons.Actions.MoveUp, "Send (Enter)") { sendMessage() }.apply {
                             isOpaque = true; background = Color(35, 134, 54)
                         })
