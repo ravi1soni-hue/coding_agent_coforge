@@ -1015,6 +1015,9 @@ class ChatToolWindowContent(private val project: Project) {
     }
 
     companion object {
+        /** Key used to store the ChatToolWindowContent instance on its root JPanel. */
+        const val CLIENT_KEY = "CoforgeAiChatContent"
+
         val BG_DEEP     = Color(15, 17, 23)
         val BG_SURFACE  = Color(33, 38, 45)
         val BG_BORDER   = Color(48, 54, 61)

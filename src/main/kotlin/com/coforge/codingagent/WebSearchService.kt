@@ -34,7 +34,9 @@ object WebSearchService {
             .connectTimeout(Duration.ofSeconds(15))
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .build()
-            .also { c -> Runtime.getRuntime().addShutdownHook(Thread { c.close() }) }
+            .also { c -> Runtime.getRuntime().addShutdownHook(Thread {
+                try { c.javaClass.getMethod("close").invoke(c) } catch (_: Exception) { }
+            }) }
     }
 
     // Thread-safe user agent rotation

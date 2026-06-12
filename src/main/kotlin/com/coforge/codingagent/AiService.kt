@@ -34,7 +34,10 @@ object AiService {
             .connectTimeout(Duration.ofSeconds(60))
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .build()
-            .also { c -> Runtime.getRuntime().addShutdownHook(Thread { c.close() }) }
+            .also { c -> Runtime.getRuntime().addShutdownHook(Thread {
+                // close() exists only on Java 21+; call reflectively so we compile on Java 17
+                try { c.javaClass.getMethod("close").invoke(c) } catch (_: Exception) { }
+            }) }
     }
 
     // ─── Open-ended system prompts (no hardcoded library lists) ──────────────
@@ -461,15 +464,25 @@ object AiService {
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
 
-    private fun parseBlocking(body: String): String = try {
-        val choices = gson.fromJson(body, JsonObject::class.java).getAsJsonArray("choices")
-        if (choices == null || choices.size() == 0) { LOG.warn("Empty choices: ${body.take(200)}"); return body }
-        choices[0].asJsonObject.getAsJsonObject("message")?.get("content")?.asString ?: body
-    } catch (e: Exception) { LOG.warn("Parse error: ${body.take(200)}"); body }
+    private fun parseBlocking(body: String): String {
+        return try {
+            val choices = gson.fromJson(body, JsonObject::class.java).getAsJsonArray("choices")
+            if (choices == null || choices.size() == 0) {
+                LOG.warn("Empty choices: ${body.take(200)}")
+                return body
+            }
+            choices[0].asJsonObject.getAsJsonObject("message")?.get("content")?.asString ?: body
+        } catch (e: Exception) {
+            LOG.warn("Parse error: ${body.take(200)}")
+            body
+        }
+    }
 
-    private fun parseStreamDelta(json: String): String = try {
-        val choices = gson.fromJson(json, JsonObject::class.java).getAsJsonArray("choices")
-        if (choices == null || choices.size() == 0) return ""
-        choices[0].asJsonObject.getAsJsonObject("delta")?.get("content")?.asString ?: ""
-    } catch (_: Exception) { "" }
+    private fun parseStreamDelta(json: String): String {
+        return try {
+            val choices = gson.fromJson(json, JsonObject::class.java).getAsJsonArray("choices")
+            if (choices == null || choices.size() == 0) return ""
+            choices[0].asJsonObject.getAsJsonObject("delta")?.get("content")?.asString ?: ""
+        } catch (_: Exception) { "" }
+    }
 }

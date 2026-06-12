@@ -66,7 +66,13 @@ fun openChatWithPrompt(project: Project, prompt: String) {
 }
 
 private fun findChatContent(c: java.awt.Component): ChatToolWindowContent? {
-    if (c is ChatToolWindowContent) return c
-    if (c is java.awt.Container) for (child in c.components) findChatContent(child)?.let { return it }
+    // ChatToolWindowContent is not a Swing component — it stores itself on its root JPanel
+    if (c is javax.swing.JComponent) {
+        val stored = c.getClientProperty(ChatToolWindowContent.CLIENT_KEY)
+        if (stored is ChatToolWindowContent) return stored
+    }
+    if (c is java.awt.Container) {
+        for (child in c.components) findChatContent(child)?.let { return it }
+    }
     return null
 }

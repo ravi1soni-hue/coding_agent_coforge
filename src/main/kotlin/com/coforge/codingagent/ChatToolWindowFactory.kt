@@ -8,6 +8,8 @@ import com.intellij.ui.content.ContentFactory
 class ChatToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val chatToolWindow = ChatToolWindowContent(project)
+        // Tag the root panel so QuickActionsGroup can retrieve the instance without a Swing cast
+        chatToolWindow.contentPanel.putClientProperty(ChatToolWindowContent.CLIENT_KEY, chatToolWindow)
         val content = ContentFactory.getInstance().createContent(chatToolWindow.contentPanel, "", false)
         toolWindow.contentManager.addContent(content)
     }
