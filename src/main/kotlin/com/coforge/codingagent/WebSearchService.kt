@@ -13,31 +13,19 @@ import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Web search and documentation fetcher.
+ * Web search and documentation fetcher — fully open-ended.
  *
- * Based on research findings:
+ * NO hardcoded library whitelists. Any package, any topic, any query.
  *
- * 1. DuckDuckGo Instant Answer API (api.duckduckgo.com/?format=json)
- *    - OFFICIAL, stable, no rate limits documented
- *    - Only returns results for well-known topics (Wikipedia abstracts, direct answers)
- *    - Returns empty for most developer library queries
- *    - Used as Tier 1 (fast, reliable when it works)
- *
- * 2. Direct documentation fetching
- *    - pub.dev, developer.android.com, kotlinlang.org, flutter.dev all respond well
- *    - Most reliable and accurate for developer queries
- *    - Used as Tier 2 (targeted, authoritative)
- *
- * 3. DuckDuckGo Lite HTML (lite.duckduckgo.com/lite/)
- *    - No official API — HTML scraping only
- *    - Rate limits are real (Python duckduckgo-search library warns about this)
- *    - URL format confirmed: href="//duckduckgo.com/l/?uddg=ENCODED_URL&rut=HASH"
- *    - Used as Tier 3 (general fallback, with rate limiting + retry)
+ * Tier 1: DuckDuckGo Instant Answer API  — official, stable
+ * Tier 2: Direct doc fetch (pub.dev, kotlinlang.org, developer.android.com, flutter.dev)
+ *         - Known topics: direct URL fetch
+ *         - Unknown topics: site:-scoped DuckDuckGo Lite search → fetch top result
+ * Tier 3: DuckDuckGo Lite general search — catches everything else
  */
 object WebSearchService {
     private val LOG = Logger.getInstance(WebSearchService::class.java)
 
-    // Minimum milliseconds between DuckDuckGo Lite requests to avoid rate limiting
     private const val DDG_RATE_LIMIT_MS = 3000L
     private val lastDdgRequestMs = AtomicLong(0L)
 
@@ -48,7 +36,6 @@ object WebSearchService {
             .build()
     }
 
-    // User agents to rotate — reduces chance of being blocked
     private val userAgents = listOf(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -57,14 +44,8 @@ object WebSearchService {
     private var uaIndex = 0
     private fun nextUserAgent() = userAgents[uaIndex++ % userAgents.size]
 
-    data class SearchResult(val title: String, val url: String, val snippet: String = "")
-
     // ─── Main entry point ─────────────────────────────────────────────────────
 
-    /**
-     * Decides whether to search, then runs the tier waterfall.
-     * Returns formatted context string ready to inject into the AI prompt.
-     */
     fun fetchContextIfNeeded(
         userMessage: String,
         projectType: ProjectTypeDetector.ProjectType
@@ -73,13 +54,13 @@ object WebSearchService {
 
         val sb = StringBuilder()
 
-        // Tier 1: Official DDG Instant Answer API (fast check)
+        // Tier 1: Official DDG Instant Answer API
         instantAnswer(userMessage)?.let { sb.append("$it\n\n") }
 
-        // Tier 2: Smart direct documentation (most reliable)
+        // Tier 2: Direct documentation (open-ended — works for any topic)
         directDocFetch(userMessage, projectType)?.let { sb.append("$it\n\n") }
 
-        // Tier 3: DDG Lite general search (only if tiers 1+2 returned little)
+        // Tier 3: DDG Lite general search (always fires if tiers 1+2 returned little)
         if (sb.length < 500) {
             val query = buildSearchQuery(userMessage, projectType)
             liteSearchAndFetch(query, maxResults = 2)?.let { sb.append(it) }
@@ -89,90 +70,90 @@ object WebSearchService {
     }
 
     // ─── Tier 1: Official DuckDuckGo Instant Answer API ──────────────────────
-    // Documented at: https://duckduckgo.com/api
-    // Returns: AbstractText, Answer, Definition, RelatedTopics
-    // Reliable for well-known entities; empty for niche library queries.
 
     fun instantAnswer(query: String): String? {
         return try {
             val encoded = URLEncoder.encode(query, "UTF-8")
             val url = "https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1"
-            val html = fetch(url, isDdgLite = false) ?: return null
-
-            val json = JsonParser.parseString(html).asJsonObject
+            val body = fetch(url, isDdgLite = false) ?: return null
+            val json = JsonParser.parseString(body).asJsonObject
             val result = StringBuilder()
-
-            json.getStr("AbstractText")?.takeIf { it.length > 30 }
-                ?.let { result.append("Summary: $it\n") }
-            json.getStr("Answer")?.takeIf { it.isNotBlank() }
-                ?.let { result.append("Answer: $it\n") }
-            json.getStr("Definition")?.takeIf { it.isNotBlank() }
-                ?.let { result.append("Definition: $it\n") }
-
-            // RelatedTopics give us snippets even when main answer is empty
+            json.getStr("AbstractText")?.takeIf { it.length > 30 }?.let { result.append("Summary: $it\n") }
+            json.getStr("Answer")?.takeIf { it.isNotBlank() }?.let { result.append("Answer: $it\n") }
+            json.getStr("Definition")?.takeIf { it.isNotBlank() }?.let { result.append("Definition: $it\n") }
             json.getAsJsonArray("RelatedTopics")?.take(3)?.forEach { el ->
-                val topic = el.asJsonObject
-                topic.getStr("Text")?.takeIf { it.length > 20 }
-                    ?.let { result.append("• $it\n") }
+                el.asJsonObject.getStr("Text")?.takeIf { it.length > 20 }?.let { result.append("• $it\n") }
             }
-
             result.toString().trim().takeIf { it.isNotBlank() }
         } catch (e: Exception) {
-            LOG.debug("DDG Instant Answer error: ${e.message}")
+            LOG.debug("DDG Instant Answer: ${e.message}")
             null
         }
     }
 
-    // ─── Tier 2: Smart direct documentation fetch ─────────────────────────────
-    // Routes to the right documentation source based on what the query is about.
-    // These sites are stable, load correctly, and return authoritative content.
+    // ─── Tier 2: Direct documentation — open-ended ───────────────────────────
+    //
+    // For known topic keywords → direct URL fetch (fast, authoritative)
+    // For UNKNOWN topics       → site:-scoped DDG search → fetch top result
+    // This means ANY library, ANY topic is covered — no whitelist needed.
 
     fun directDocFetch(query: String, projectType: ProjectTypeDetector.ProjectType): String? {
         val lower = query.lowercase()
         val results = mutableListOf<String>()
 
-        // pub.dev: Flutter/Dart packages — use UrlContentFetcher which already knows the pub.dev format
+        // ── pub.dev: any snake_case word is a candidate package name ──────────
         if (projectType == ProjectTypeDetector.ProjectType.FLUTTER || lower.contains("flutter") || lower.contains("dart")) {
-            extractPackageName(lower)?.let { pkg ->
+            extractAnyPackageName(lower)?.let { pkg ->
                 try {
                     val result = UrlContentFetcher.fetch("https://pub.dev/packages/$pkg")
                     if (result.content.length > 50) results.add("pub.dev / $pkg:\n${result.content.take(3000)}")
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                    // Package not found — fall through to general search
+                }
             }
         }
 
-        // Kotlin docs: kotlinlang.org
+        // ── Kotlin docs ───────────────────────────────────────────────────────
         if (lower.contains("kotlin") || lower.contains("coroutine") || lower.contains("flow") ||
-            lower.contains("suspend") || lower.contains("channel") || lower.contains("stateflow")) {
-            val topic = extractKotlinDocTopic(lower)
+            lower.contains("suspend") || lower.contains("kmp") || lower.contains("multiplatform")) {
+            val topic = mapKotlinTopic(lower)
             if (topic != null) {
+                // Known topic — fetch directly
                 fetch("https://kotlinlang.org/docs/$topic.html", isDdgLite = false)
-                    ?.let { cleanDocHtml(it) }
-                    ?.takeIf { it.length > 100 }
-                    ?.let { results.add("Kotlin docs ($topic):\n${it.take(2000)}") }
+                    ?.let { cleanDocHtml(it) }?.takeIf { it.length > 100 }
+                    ?.let { results.add("Kotlin docs:\n${it.take(2000)}") }
+            } else {
+                // Unknown topic — search within kotlinlang.org
+                fetchTopResultFor("site:kotlinlang.org $lower")
+                    ?.let { results.add("Kotlin docs:\n${it.take(2000)}") }
             }
         }
 
-        // Android developer docs
+        // ── Android developer docs ────────────────────────────────────────────
         if (projectType == ProjectTypeDetector.ProjectType.ANDROID_NATIVE ||
             lower.contains("android") || lower.contains("compose") || lower.contains("jetpack")) {
-            val topic = extractAndroidDocPath(lower)
-            if (topic != null) {
-                fetch("https://developer.android.com/$topic", isDdgLite = false)
-                    ?.let { cleanDocHtml(it) }
-                    ?.takeIf { it.length > 100 }
+            val path = mapAndroidPath(lower)
+            if (path != null) {
+                fetch("https://developer.android.com/$path", isDdgLite = false)
+                    ?.let { cleanDocHtml(it) }?.takeIf { it.length > 100 }
+                    ?.let { results.add("Android docs:\n${it.take(2000)}") }
+            } else {
+                // Unknown topic — search within developer.android.com
+                fetchTopResultFor("site:developer.android.com $lower")
                     ?.let { results.add("Android docs:\n${it.take(2000)}") }
             }
         }
 
-        // Flutter docs: flutter.dev
-        if (lower.contains("flutter") && (lower.contains("widget") || lower.contains("navigation") ||
-            lower.contains("state") || lower.contains("animation") || lower.contains("testing"))) {
-            val topic = extractFlutterDocPath(lower)
-            if (topic != null) {
-                fetch("https://docs.flutter.dev/$topic", isDdgLite = false)
-                    ?.let { cleanDocHtml(it) }
-                    ?.takeIf { it.length > 100 }
+        // ── Flutter docs ──────────────────────────────────────────────────────
+        if (lower.contains("flutter")) {
+            val path = mapFlutterPath(lower)
+            if (path != null) {
+                fetch("https://docs.flutter.dev/$path", isDdgLite = false)
+                    ?.let { cleanDocHtml(it) }?.takeIf { it.length > 100 }
+                    ?.let { results.add("Flutter docs:\n${it.take(2000)}") }
+            } else {
+                // Unknown topic — search within docs.flutter.dev
+                fetchTopResultFor("site:docs.flutter.dev $lower")
                     ?.let { results.add("Flutter docs:\n${it.take(2000)}") }
             }
         }
@@ -180,10 +161,19 @@ object WebSearchService {
         return results.joinToString("\n\n---\n\n").takeIf { it.isNotBlank() }
     }
 
-    // ─── Tier 3: DuckDuckGo Lite HTML scraping ────────────────────────────────
-    // lite.duckduckgo.com/lite/ is simpler HTML than the full page.
-    // Confirmed URL format: href="//duckduckgo.com/l/?uddg=ENCODED_URL&rut=HASH"
-    // Rate limited — enforced by lastDdgRequestMs throttle + retry logic.
+    /**
+     * Searches DDG Lite with a site: query and fetches the first real result.
+     * Used when we don't have a hard-coded path for the topic asked.
+     */
+    private fun fetchTopResultFor(siteQuery: String): String? {
+        val urls = liteSearchUrls(siteQuery, maxResults = 1) ?: return null
+        val url = urls.firstOrNull() ?: return null
+        return try {
+            UrlContentFetcher.fetch(url).content.takeIf { it.length > 100 }
+        } catch (_: Exception) { null }
+    }
+
+    // ─── Tier 3: DuckDuckGo Lite general search ───────────────────────────────
 
     fun liteSearchAndFetch(query: String, maxResults: Int = 3): String? {
         val urls = liteSearchUrls(query, maxResults) ?: return null
@@ -193,31 +183,26 @@ object WebSearchService {
                 if (result.content.isBlank()) null
                 else "### ${result.title.ifBlank { url }}\n${result.content.take(2000)}"
             } catch (e: Exception) {
-                LOG.debug("Failed to fetch $url: ${e.message}")
+                LOG.debug("Fetch failed $url: ${e.message}")
                 null
             }
         }
-        if (fetched.isEmpty()) return null
-        return "Web search results:\n\n${fetched.joinToString("\n\n---\n\n")}"
+        return if (fetched.isEmpty()) null
+               else "Web search results:\n\n${fetched.joinToString("\n\n---\n\n")}"
     }
 
     fun liteSearchUrls(query: String, maxResults: Int = 5): List<String>? {
-        // Respect rate limit
         val now = System.currentTimeMillis()
         val elapsed = now - lastDdgRequestMs.get()
-        if (elapsed < DDG_RATE_LIMIT_MS) {
-            Thread.sleep(DDG_RATE_LIMIT_MS - elapsed)
-        }
+        if (elapsed < DDG_RATE_LIMIT_MS) Thread.sleep(DDG_RATE_LIMIT_MS - elapsed)
 
         return try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "https://lite.duckduckgo.com/lite/?q=$encoded&kl=us-en"
-            val html = fetch(url, isDdgLite = true) ?: return null
+            val html = fetch("https://lite.duckduckgo.com/lite/?q=$encoded&kl=us-en", isDdgLite = true) ?: return null
             lastDdgRequestMs.set(System.currentTimeMillis())
             parseLiteUrls(html, maxResults)
         } catch (e: Exception) {
-            LOG.debug("DDG Lite search error: ${e.message}")
-            // Retry once after 2s on error
+            LOG.debug("DDG Lite error: ${e.message}")
             try {
                 Thread.sleep(2000)
                 val encoded = URLEncoder.encode(query, "UTF-8")
@@ -228,54 +213,45 @@ object WebSearchService {
         }
     }
 
-    /**
-     * Parses DuckDuckGo Lite HTML.
-     * Confirmed URL format (from research): href="//duckduckgo.com/l/?uddg=ENCODED_URL&rut=HASH"
-     */
-    private fun parseLiteUrls(html: String, max: Int): List<String> {
-        // Extract uddg= encoded URLs from DDG redirect links
-        return Regex("""href="//duckduckgo\.com/l/\?uddg=([^&"]+)""")
+    private fun parseLiteUrls(html: String, max: Int): List<String> =
+        Regex("""href="//duckduckgo\.com/l/\?uddg=([^&"]+)""")
             .findAll(html)
             .mapNotNull { m ->
                 try {
-                    val decoded = URLDecoder.decode(m.groupValues[1], "UTF-8")
-                    decoded.takeIf { it.startsWith("http") && !it.contains("duckduckgo.com") }
+                    URLDecoder.decode(m.groupValues[1], "UTF-8")
+                        .takeIf { it.startsWith("http") && !it.contains("duckduckgo.com") }
                 } catch (_: Exception) { null }
             }
-            .distinct()
-            .take(max)
-            .toList()
-    }
+            .distinct().take(max).toList()
 
-    // ─── Should search? ───────────────────────────────────────────────────────
+    // ─── shouldSearch — open-ended, no fixed library list ────────────────────
+    //
+    // Searches when the query is about something that could have changed since
+    // the model's training cutoff or needs current documentation.
+    // No hardcoded library names — any library triggers search.
 
     fun shouldSearch(message: String): Boolean {
         val lower = message.lowercase()
 
-        // Explicit requests
-        if (lower.contains("search") || lower.contains("find documentation") ||
-            lower.contains("official docs") || lower.contains("how to use")) return true
-        if (lower.contains("latest version") || lower.contains("changelog") ||
-            lower.contains("migration") || lower.contains("release notes")) return true
+        // Explicit doc requests
+        if (Regex("""\b(search|documentation|docs|official|changelog|release|migration|upgrade|version)\b""")
+                .containsMatchIn(lower)) return true
 
-        // Known packages and libraries that change frequently
-        val fastMovingLibs = setOf(
-            "riverpod", "bloc", "cubit", "getx", "isar", "objectbox",
-            "ktor", "serialization", "coil3", "datastore", "workmanager",
-            "compose multiplatform", "kotlin multiplatform", "kmp", "kmm",
-            "go_router", "auto_route", "get_it", "flutter_hooks", "signals",
-            "mason", "drift", "floor", "realm", "supabase", "appwrite",
-            "accompanist", "voyager", "decompose", "circuit", "turbine",
-            "firebase", "crashlytics", "amplitude", "mixpanel",
-            "dagger", "hilt", "anvil", "koin"
-        )
-        if (fastMovingLibs.any { lower.contains(it) }) return true
+        // Any version number mentioned
+        if (Regex("""\d+\.\d+""").containsMatchIn(lower)) return true
 
-        // Version number = user is asking about something specific
-        if (Regex("\\d+\\.\\d+\\.?\\d*").containsMatchIn(lower)) return true
+        // Any snake_case identifier = almost certainly a library/package name
+        // e.g. go_router, flutter_riverpod, retrofit2, moko_mvvm, patrol_finders
+        if (Regex("""\b[a-z][a-z0-9]*_[a-z][a-z0-9_]*\b""").containsMatchIn(lower)) return true
 
-        // Long descriptions (pasted requirements from Jira / task)
-        if (message.length > 350) return true
+        // Implementation-type questions about specific tech
+        if (Regex("""\b(how (do|to|can)|implement|integrate|setup|configure|install|add|use)\b""")
+                .containsMatchIn(lower) &&
+            Regex("""\b(library|plugin|package|sdk|api|framework|gradle|pubspec|dependency|module)\b""")
+                .containsMatchIn(lower)) return true
+
+        // Long task descriptions (Jira/requirements paste)
+        if (message.trim().length > 300) return true
 
         return false
     }
@@ -284,60 +260,70 @@ object WebSearchService {
         val platform = when (projectType) {
             ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter Dart"
             ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android Kotlin"
-            ProjectTypeDetector.ProjectType.UNKNOWN -> "Android"
+            ProjectTypeDetector.ProjectType.UNKNOWN -> "Android Kotlin"
         }
-        val cleaned = message.replace(Regex("```[\\s\\S]*?```"), "")
-            .replace(Regex("<[^>]+>"), "").replace(Regex("\\s+"), " ").trim().take(100)
+        val cleaned = message
+            .replace(Regex("```[\\s\\S]*?```"), "")
+            .replace(Regex("<[^>]+>"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim().take(120)
         return "$platform $cleaned"
     }
 
-    // ─── Documentation routing helpers ───────────────────────────────────────
+    // ─── Package name extraction — open-ended ─────────────────────────────────
+    //
+    // Extracts ANY snake_case word from the query as a pub.dev package candidate.
+    // No whitelist — works for new packages released after this code was written.
 
-    private fun extractPackageName(lower: String): String? {
-        // Common Flutter packages — extend as needed
-        val packages = listOf(
-            "riverpod","flutter_riverpod","hooks_riverpod","provider","bloc",
-            "flutter_bloc","go_router","auto_route","get_it","injectable",
-            "dio","http","retrofit","chopper","hive","isar","objectbox",
-            "realm","drift","floor","shared_preferences","sqflite",
-            "firebase_core","firebase_auth","cloud_firestore","firebase_storage",
-            "supabase_flutter","appwrite","amplify_flutter",
-            "flutter_hooks","flutter_gen","freezed","json_serializable",
-            "built_value","equatable","dartz","fpdart",
-            "cached_network_image","flutter_svg","lottie","shimmer",
-            "intl","timeago","path_provider","package_info_plus",
-            "permission_handler","geolocator","google_maps_flutter",
-            "image_picker","camera","video_player","just_audio",
-            "local_auth","flutter_secure_storage","encrypt",
-            "connectivity_plus","internet_connection_checker",
-            "flutter_local_notifications","awesome_notifications",
-            "in_app_purchase","purchases_flutter","adapty",
-            "sentry_flutter","datadog_flutter_plugin",
-            "mason","very_good_cli","flutter_gen","slang"
+    private fun extractAnyPackageName(lower: String): String? {
+        // Words that look like package names but are common Dart/Flutter code patterns
+        val falsePositives = setOf(
+            "build_context", "build_runner", "build_gradle", "on_pressed", "on_tap",
+            "on_changed", "text_style", "box_decoration", "edge_insets", "font_weight",
+            "font_size", "border_radius", "on_create", "on_resume", "on_pause",
+            "on_destroy", "view_model", "data_binding", "view_binding", "use_state",
+            "use_effect", "on_submit", "on_save", "key_value", "content_type"
         )
-        return packages.firstOrNull { lower.contains(it) }
+
+        return Regex("""\b([a-z][a-z0-9]*(?:_[a-z0-9]+){1,5})\b""")
+            .findAll(lower)
+            .map { it.groupValues[1] }
+            .filter { it.length >= 4 && it !in falsePositives }
+            .firstOrNull()
     }
 
-    private fun extractKotlinDocTopic(lower: String): String? = when {
+    // ─── Known topic maps (direct URL routes) ─────────────────────────────────
+    // These cover the COMMON cases for speed. Unknown topics fall through to
+    // site:-scoped DDG search above — so nothing is missed.
+
+    private fun mapKotlinTopic(lower: String): String? = when {
         lower.contains("coroutine") -> "coroutines-overview"
-        lower.contains("flow") && lower.contains("state") -> "stateflow-and-sharedflow"
+        lower.contains("stateflow") || (lower.contains("flow") && lower.contains("state")) -> "stateflow-and-sharedflow"
+        lower.contains("sharedflow") -> "stateflow-and-sharedflow"
         lower.contains("flow") -> "flow"
         lower.contains("channel") -> "channels"
         lower.contains("suspend") -> "composing-suspending-functions"
         lower.contains("sealed") -> "sealed-classes"
-        lower.contains("extension") -> "extensions"
+        lower.contains("extension fun") || lower.contains("extension function") -> "extensions"
         lower.contains("inline") && lower.contains("fun") -> "inline-functions"
         lower.contains("delegation") || lower.contains("delegate") -> "delegation"
         lower.contains("companion") -> "object-declarations"
-        else -> null
+        lower.contains("data class") -> "data-classes"
+        lower.contains("enum") -> "enum-classes"
+        lower.contains("generics") -> "generics"
+        lower.contains("lambda") -> "lambdas"
+        lower.contains("scope function") || lower.contains("let(") || lower.contains(".run(") || lower.contains(".apply(") -> "scope-functions"
+        else -> null  // → falls through to site:kotlinlang.org search
     }
 
-    private fun extractAndroidDocPath(lower: String): String? = when {
+    private fun mapAndroidPath(lower: String): String? = when {
         lower.contains("compose") && lower.contains("navigation") -> "jetpack/compose/navigation"
         lower.contains("compose") && lower.contains("state") -> "jetpack/compose/state"
         lower.contains("compose") && lower.contains("layout") -> "jetpack/compose/layouts/basics"
         lower.contains("compose") && lower.contains("animation") -> "jetpack/compose/animation/overview"
         lower.contains("compose") && lower.contains("test") -> "jetpack/compose/testing"
+        lower.contains("compose") && lower.contains("side effect") -> "jetpack/compose/side-effects"
+        lower.contains("compose") && lower.contains("theming") -> "jetpack/compose/designsystems/material3"
         lower.contains("compose") -> "jetpack/compose/documentation"
         lower.contains("viewmodel") -> "topic/libraries/architecture/viewmodel"
         lower.contains("datastore") -> "topic/libraries/architecture/datastore"
@@ -346,20 +332,32 @@ object WebSearchService {
         lower.contains("hilt") -> "training/dependency-injection/hilt-android"
         lower.contains("room") -> "training/data-storage/room"
         lower.contains("lifecycle") -> "topic/libraries/architecture/lifecycle"
-        else -> null
+        lower.contains("navigation") -> "guide/navigation"
+        lower.contains("biometric") -> "training/sign-in/biometric-auth"
+        lower.contains("media3") || lower.contains("exoplayer") -> "guide/topics/media/exoplayer"
+        lower.contains("camerax") -> "training/camerax"
+        lower.contains("permission") -> "training/permissions"
+        else -> null  // → falls through to site:developer.android.com search
     }
 
-    private fun extractFlutterDocPath(lower: String): String? = when {
+    private fun mapFlutterPath(lower: String): String? = when {
         lower.contains("navigation") || lower.contains("routing") -> "ui/navigation"
-        lower.contains("state") -> "data-and-backend/state-mgmt/intro"
+        lower.contains("state management") || lower.contains("state mgmt") -> "data-and-backend/state-mgmt/intro"
         lower.contains("animation") -> "ui/animations"
-        lower.contains("testing") || lower.contains("test") -> "testing/overview"
+        lower.contains("test") -> "testing/overview"
         lower.contains("platform channel") -> "platform-integration/platform-channels"
         lower.contains("widget") -> "ui/widgets/basics"
-        else -> null
+        lower.contains("accessibility") -> "ui/accessibility"
+        lower.contains("localization") || lower.contains("l10n") -> "ui/accessibility/internationalization"
+        lower.contains("async") || lower.contains("future") || lower.contains("stream") -> "cookbook/networking/background-parsing"
+        lower.contains("network") || lower.contains("http") -> "cookbook/networking/fetch-data"
+        lower.contains("json") -> "data-and-backend/serialization/json"
+        lower.contains("firebase") -> "data-and-backend/firebase"
+        lower.contains("flavor") -> "deployment/flavors"
+        else -> null  // → falls through to site:docs.flutter.dev search
     }
 
-    // ─── HTML fetch ───────────────────────────────────────────────────────────
+    // ─── HTTP helpers ─────────────────────────────────────────────────────────
 
     private fun fetch(url: String, isDdgLite: Boolean): String? {
         return try {
@@ -375,11 +373,11 @@ object WebSearchService {
             val response = client.send(request, HttpResponse.BodyHandlers.ofString())
             when (response.statusCode()) {
                 in 200..299 -> response.body()
-                429 -> { LOG.warn("Rate limited by $url"); null }
-                else -> { LOG.debug("HTTP ${response.statusCode()} for $url"); null }
+                429 -> { LOG.warn("Rate limited: $url"); null }
+                else -> { LOG.debug("HTTP ${response.statusCode()}: $url"); null }
             }
         } catch (e: Exception) {
-            LOG.debug("Fetch error for $url: ${e.message}")
+            LOG.debug("Fetch error $url: ${e.message}")
             null
         }
     }
@@ -403,4 +401,3 @@ object WebSearchService {
 
     private fun JsonObject.getStr(key: String) = try { get(key)?.asString } catch (_: Exception) { null }
 }
-
