@@ -55,7 +55,9 @@ object ProjectDependencyAnalyzer {
         }
     }
 
-    private val cache = mutableMapOf<String, ProjectDeps>()
+    private val cache = object : LinkedHashMap<String, ProjectDeps>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ProjectDeps>) = size > 10
+    }
 
     fun analyze(project: Project): ProjectDeps {
         val base = project.basePath ?: return empty()
@@ -86,7 +88,7 @@ object ProjectDependencyAnalyzer {
                 line.startsWith("flutter:") && !inDeps && !inDevDeps -> { inFlutter = true; inDeps = false; inDevDeps = false }
                 line.startsWith("  ") && (inDeps || inDevDeps) -> {
                     val trimmed = line.trim()
-                    if (trimmed.isBlank() || trimmed.startsWith("#")) return@lines
+                    if (trimmed.isBlank() || trimmed.startsWith("#")) continue
                     val parts = trimmed.split(":")
                     val name = parts[0].trim()
                     val version = parts.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() && it != "null" }
@@ -143,12 +145,13 @@ object ProjectDependencyAnalyzer {
         }
 
         // 2. Module build.gradle files (app + any modules)
-        val gradleFiles = listOf("app/build.gradle", "app/build.gradle.kts", "build.gradle", "build.gradle.kts")
-            .map { File("$base/$it") }.filter { it.exists() }
-
+        val gradleFiles = mutableListOf<File>()
+        listOf("app/build.gradle", "app/build.gradle.kts", "build.gradle", "build.gradle.kts")
+            .map { File("$base/$it") }.filterTo(gradleFiles) { it.exists() }
         // Also find module build.gradle files
-        File(base).listFiles()?.filter { it.isDirectory && File(it, "build.gradle.kts").exists() }
-            ?.forEach { gradleFiles.toMutableList().add(File(it, "build.gradle.kts")) }
+        File(base).listFiles()
+            ?.filter { it.isDirectory && File(it, "build.gradle.kts").exists() }
+            ?.forEach { gradleFiles.add(File(it, "build.gradle.kts")) }
 
         val depPatterns = listOf(
             Regex("""(?:implementation|api|testImplementation|androidTestImplementation|kapt|ksp|debugImplementation)\s*["'(]([^"')]+)["')]"""),

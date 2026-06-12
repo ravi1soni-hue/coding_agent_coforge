@@ -15,18 +15,15 @@ class BuildContextService : BuildProgressListener {
 
     data class BuildIssue(val severity: String, val message: String, val file: String?)
 
-    private val issues = ArrayDeque<BuildIssue>(maxOf = 30)
+    // Plain ArrayDeque — no invalid named parameter
+    private val issues = ArrayDeque<BuildIssue>()
+    private val MAX_ISSUES = 30
 
     override fun onEvent(buildId: Any, event: BuildEvent) {
         when (event) {
-            is FailureResult -> {
-                event.failures.forEach { failure ->
-                    addIssue(BuildIssue("ERROR", failure.message ?: "Build failure", null))
-                }
-            }
             is FileMessageEvent -> {
                 val severity = when (event.kind) {
-                    MessageEvent.Kind.ERROR -> "ERROR"
+                    MessageEvent.Kind.ERROR   -> "ERROR"
                     MessageEvent.Kind.WARNING -> "WARNING"
                     else -> return
                 }
@@ -34,16 +31,16 @@ class BuildContextService : BuildProgressListener {
             }
             is MessageEvent -> {
                 val severity = when (event.kind) {
-                    MessageEvent.Kind.ERROR -> "ERROR"
+                    MessageEvent.Kind.ERROR   -> "ERROR"
                     MessageEvent.Kind.WARNING -> "WARNING"
                     else -> return
                 }
                 addIssue(BuildIssue(severity, event.message, null))
             }
             is FinishBuildEvent -> {
+                // Clear errors on successful build
                 if (event.result is SuccessResult) {
-                    // Clear errors on successful build
-                    issues.removeAll { it.severity == "ERROR" }
+                    synchronized(this) { issues.removeAll { it.severity == "ERROR" } }
                 }
             }
         }
@@ -51,7 +48,7 @@ class BuildContextService : BuildProgressListener {
 
     @Synchronized
     private fun addIssue(issue: BuildIssue) {
-        if (issues.size >= 30) issues.removeFirst()
+        if (issues.size >= MAX_ISSUES) issues.removeFirst()
         issues.addLast(issue)
     }
 
@@ -66,15 +63,11 @@ class BuildContextService : BuildProgressListener {
         }
     }
 
+    @Synchronized
+    fun clear() = issues.clear()
+
     companion object {
         fun getInstance(project: Project): BuildContextService =
             project.getService(BuildContextService::class.java)
-    }
-}
-
-private fun ArrayDeque<*>.removeAll(predicate: (Any?) -> Boolean) {
-    val iter = this.iterator()
-    while (iter.hasNext()) {
-        if (predicate(iter.next())) iter.remove()
     }
 }

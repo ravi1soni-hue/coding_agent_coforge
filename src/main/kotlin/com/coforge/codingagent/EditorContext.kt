@@ -180,7 +180,17 @@ object EditorContext {
      * if the user mentions UserRepository, it finds and includes that file even
      * if it's not currently open.
      */
+    /**
+     * Graph-aware context: uses CodebaseGraph to find files by cross-file relationships
+     * (who defines X, who uses X, what does X import) in addition to keyword scoring.
+     * Falls back to pure keyword search if the graph is empty.
+     */
     fun getIndexedContext(project: Project, query: String): String {
+        // Prefer graph-enriched context — it includes callers + dependencies
+        val graphContext = CodebaseGraph.getGraphContext(project, query)
+        if (graphContext.isNotBlank()) return graphContext
+
+        // Fallback: plain keyword index
         val relevant = ProjectIndexer.findRelevant(project, query, topN = 5)
         if (relevant.isEmpty()) return ""
         return buildString {

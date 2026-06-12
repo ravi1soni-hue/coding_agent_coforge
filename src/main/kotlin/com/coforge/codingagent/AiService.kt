@@ -277,6 +277,63 @@ object AiService {
         }
     }
 
+    // ─── Agentic test-fix loop ────────────────────────────────────────────────
+
+    /**
+     * Called by the agentic loop after test failures.
+     * Sends the failures + the files that were just changed to the FIX chain.
+     * Streams the fix back just like a normal agent call.
+     */
+    fun fixTestFailures(
+        failureOutput: String,
+        changedFiles: List<String>,
+        project: Project,
+        onStatus: (String) -> Unit,
+        onToken: (String) -> Unit,
+        onComplete: (String) -> Unit
+    ) {
+        stopRequested = false
+        val settings = AppSettingsState.instance
+        val info = ProjectTypeDetector.detect(project)
+        val deps = ProjectDependencyAnalyzer.analyze(project)
+
+        val indexContext = try { EditorContext.getIndexedContext(project, failureOutput.take(500)) } catch (_: Exception) { "" }
+        val fileList = changedFiles.joinToString(", ")
+
+        onStatus("Analyzing failures...")
+        callModelBlocking(settings.kimiModel, settings.kimiApiKey,
+            kimiSystem(info, deps),
+            """
+            The following test failures occurred after applying changes to: $fileList
+
+            TEST OUTPUT:
+            $failureOutput
+
+            CODEBASE CONTEXT:
+            $indexContext
+
+            Produce a precise plan to fix ALL failing tests.
+            """.trimIndent()
+        ).thenCompose { plan ->
+            if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
+            onStatus("Fixing...")
+            callModelStreaming(settings.gptModel, settings.gptApiKey,
+                gptImplementSystem(info, deps),
+                """
+                Validated fix plan:
+                $plan
+
+                Files that were changed and now have test failures: $fileList
+                Test output: ${failureOutput.take(3000)}
+
+                Implement the fix. Output ONLY the corrected file(s) using <file_change> tags.
+                """.trimIndent(),
+                emptyList(), onToken)
+        }
+        .thenAccept { onComplete(it) }
+        .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
+    }
+
     // ─── Inline ghost-text completion ─────────────────────────────────────────
 
     fun getInlineCompletion(prefix: String, suffix: String, language: String): String {

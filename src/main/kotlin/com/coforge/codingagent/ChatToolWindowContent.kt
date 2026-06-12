@@ -113,8 +113,9 @@ class ChatToolWindowContent(private val project: Project) {
         contentPanel.add(welcomePanel, "WELCOME")
         contentPanel.add(chatPanel, "CHAT")
         cardLayout.show(contentPanel, "WELCOME")
-        // Warm up the codebase index in background so it's ready on first query
+        // Warm up index and graph in background so they're ready on first query
         ProjectIndexer.warmUp(project)
+        Thread { CodebaseGraph.build(project) }.apply { isDaemon = true; name = "CoforgeGraphWarmup" }.start()
     }
 
     // ─── Public API ───────────────────────────────────────────────────────────
@@ -839,7 +840,7 @@ class ChatToolWindowContent(private val project: Project) {
             val diffBtn = JButton("Diff").apply {
                 border = JBUI.Borders.empty(2, 8); isFocusPainted = false
                 addActionListener {
-                    val old = if (change.isNew) "" else try { File("${project.basePath}/${change.path}").readText() } catch (_: Exception) { "" }
+                    val old = if (change.isNew) "" else try { File("${project.basePath ?: ""}/${change.path}").readText() } catch (_: Exception) { "" }
                     DiffPreviewDialog(project, change.path, old, change.content, change.isNew).show()
                 }
             }
@@ -861,6 +862,99 @@ class ChatToolWindowContent(private val project: Project) {
             val msg = if (selected.size == changes.size) "All ${selected.size} files applied."
                       else "${selected.size} of ${changes.size} files applied."
             Messages.showInfoMessage(project, msg, "Done")
+            // Offer agentic test loop
+            val runAndFix = JOptionPane.showConfirmDialog(
+                contentPanel,
+                "Run tests and auto-fix failures? (up to 3 attempts)",
+                "Agentic Test Loop",
+                JOptionPane.YES_NO_OPTION
+            )
+            if (runAndFix == JOptionPane.YES_OPTION) {
+                startAgenticTestLoop(selected.map { it.path }, attempt = 1)
+            }
+        }
+    }
+
+    // ─── Agentic test loop ────────────────────────────────────────────────────
+    //
+    // Runs tests → on failure, asks AI to fix → applies → re-runs. Up to 3 iterations.
+    // Each attempt is shown in the terminal panel and the chat panel.
+
+    private fun startAgenticTestLoop(changedFiles: List<String>, attempt: Int) {
+        if (attempt > 3) {
+            appendSystemMessage("⚠️ Auto-fix gave up after 3 attempts. Remaining failures need manual review.")
+            return
+        }
+
+        appendSystemMessage("🤖 Attempt $attempt/3 — running tests...")
+        terminalOutput.text = ""
+        terminalPanel.isVisible = true
+
+        val isFlutterProject = isFlutter
+        val onOutput: (String) -> Unit = { line ->
+            SwingUtilities.invokeLater { terminalOutput.append(line); scrollToBottom() }
+        }
+        val onDone: (TerminalExecutor.CommandResult) -> Unit = { result ->
+            SwingUtilities.invokeLater {
+                if (result.isSuccess) {
+                    appendSystemMessage("✅ All tests pass! (attempt $attempt)")
+                } else {
+                    appendSystemMessage("❌ Tests failed (attempt $attempt) — asking AI to fix...")
+                    setInputEnabled(false); stopBtn.isVisible = true
+                    val (streamArea, reasoningArea) = appendAgentBubble()
+
+                    AiService.fixTestFailures(
+                        failureOutput  = result.output.takeLast(4000),
+                        changedFiles   = changedFiles,
+                        project        = project,
+                        onStatus       = { s -> SwingUtilities.invokeLater { statusLabel.text = s } },
+                        onToken        = { tok -> SwingUtilities.invokeLater { streamArea.append(tok); scrollToBottom() } },
+                        onComplete     = { full ->
+                            SwingUtilities.invokeLater {
+                                conversationHistory.add(Message("assistant", full))
+                                val bodyPanel = streamArea.parent as? JPanel
+                                if (bodyPanel != null && full.isNotBlank()) {
+                                    bodyPanel.removeAll()
+                                    parseMessageParts(full).forEach { bodyPanel.add(it) }
+                                    bodyPanel.revalidate(); bodyPanel.repaint()
+                                }
+                                stopBtn.isVisible = false; setInputEnabled(true)
+
+                                // Apply the fixes and loop
+                                val fixes = parseAllFileChanges(full)
+                                if (fixes.isEmpty()) {
+                                    appendSystemMessage("⚠️ AI returned no file changes. Stopping loop.")
+                                    return@invokeLater
+                                }
+                                WriteCommandAction.runWriteCommandAction(project) {
+                                    fixes.forEach { fix -> applyChangeInternal(fix.path, fix.content, fix.isNew) }
+                                }
+                                val fixedPaths = fixes.map { it.path }
+                                appendSystemMessage("Applied ${fixes.size} fix(es): ${fixedPaths.joinToString(", ")}")
+                                // Recurse for next attempt
+                                startAgenticTestLoop((changedFiles + fixedPaths).distinct(), attempt + 1)
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        if (isFlutterProject) TerminalExecutor.flutterTest(project, onOutput, onDone)
+        else TerminalExecutor.runTests(project, onOutput, onDone)
+    }
+
+    /** Adds a non-interactive status line to the chat panel. */
+    private fun appendSystemMessage(text: String) {
+        SwingUtilities.invokeLater {
+            val label = JBLabel(text).apply {
+                foreground = Color(139, 148, 158); font = font.deriveFont(Font.ITALIC, 11f)
+                border = JBUI.Borders.empty(4, 16)
+                alignmentX = Component.LEFT_ALIGNMENT
+            }
+            messagePanel.add(label)
+            messagePanel.revalidate(); messagePanel.repaint()
+            scrollToBottom()
         }
     }
 
@@ -881,8 +975,9 @@ class ChatToolWindowContent(private val project: Project) {
         ProjectTypeDetector.invalidate(project)
         ProjectDependencyAnalyzer.invalidate(project)
         ProjectIndexer.invalidate(project)
+        CodebaseGraph.invalidate(project)
         updateProjectBadge()
-        // Re-warm the index in background
+        // Re-warm the index and graph in background
         ProjectIndexer.warmUp(project)
         cardLayout.show(contentPanel, "WELCOME")
         messagePanel.revalidate(); messagePanel.repaint()
