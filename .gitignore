@@ -1,0 +1,12 @@
+# IntelliJ / Android / build
+build/
+.idea/
+.gradle/
+out/
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+``
