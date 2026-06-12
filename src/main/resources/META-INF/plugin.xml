@@ -4,9 +4,9 @@
     <vendor email="support@coforge.com" url="https://www.coforge.com">Coforge</vendor>
 
     <description><![CDATA[
-    An elite AI Coding Agent designed for Experienced Android Architects and Lead Developers.
-    Specializes exclusively in high-performance Native Android development using Kotlin, Coroutines, Flow, Jetpack Compose, and modern architecture patterns.
-    Integrates with custom LLM Router API with secure key management.
+        Elite AI Coding Agent for Android architects and lead developers.<br/>
+        <b>Kimi K2</b> reasons · <b>Gemini</b> reviews · <b>GPT-5</b> streams the implementation.<br/>
+        Inline ghost-text completions, context-menu quick actions, diff preview before applying changes.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -14,19 +14,42 @@
     <depends>com.intellij.modules.java</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- Register the Tool Window -->
+
+        <!-- Tool window (chat panel) -->
         <toolWindow id="Coforge AI Agent"
                     secondary="false"
                     icon="AllIcons.Actions.Refresh"
                     anchor="right"
                     factoryClass="com.coforge.codingagent.ChatToolWindowFactory"/>
 
-        <!-- Register Persistent State -->
+        <!-- Settings persistence -->
         <applicationService serviceImplementation="com.coforge.codingagent.AppSettingsState"/>
 
-        <!-- Register Settings Page -->
+        <!-- Settings UI page -->
         <applicationConfigurable instance="com.coforge.codingagent.AppSettingsConfigurable"
                                  id="com.coforge.codingagent.AppSettingsConfigurable"
                                  displayName="Coforge AI Agent Settings"/>
+
+        <!-- Build error capture (project-level) -->
+        <projectService serviceImplementation="com.coforge.codingagent.BuildContextService"/>
+
+        <!-- URL content fetching and project type detection are stateless objects, no registration needed -->
+
+        <!-- Inline ghost-text completions -->
+        <codeInsight.inlineCompletion.provider
+                implementation="com.coforge.codingagent.AiInlineCompletionProvider"/>
+
     </extensions>
+
+    <actions>
+        <!-- Right-click context menu inside the editor -->
+        <group id="CoforgeAiQuickActions"
+               class="com.coforge.codingagent.QuickActionsGroup"
+               text="Coforge AI"
+               description="AI actions for selected code"
+               popup="true">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </group>
+    </actions>
+
 </idea-plugin>

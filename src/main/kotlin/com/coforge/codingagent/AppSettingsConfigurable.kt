@@ -5,56 +5,39 @@ import org.jetbrains.annotations.Nls
 import javax.swing.JComponent
 
 class AppSettingsConfigurable : Configurable {
-    private var settingsComponent: AppSettingsComponent? = null
+    private var component: AppSettingsComponent? = null
 
     @Nls(capitalization = Nls.Capitalization.Title)
-    override fun getDisplayName(): String = "Coforge AI Agent Settings"
+    override fun getDisplayName() = "Coforge AI Agent Settings"
 
     override fun createComponent(): JComponent? {
-        settingsComponent = AppSettingsComponent()
-        return settingsComponent?.panel
+        component = AppSettingsComponent()
+        return component?.panel
     }
 
     override fun isModified(): Boolean {
-        val settings = AppSettingsState.instance
-        val component = settingsComponent ?: return false
-        return component.claudeKeyText != settings.claudeApiKey ||
-               component.claudeModelText != settings.claudeModel ||
-               component.kimiKeyText != settings.kimiApiKey ||
-               component.kimiModelText != settings.kimiModel ||
-               component.geminiKeyText != settings.geminiApiKey ||
-               component.geminiModelText != settings.geminiModel ||
-               component.gptKeyText != settings.gptApiKey ||
-               component.gptModelText != settings.gptModel
+        val s = AppSettingsState.instance
+        val c = component ?: return false
+        return c.kimiKeyText != s.kimiApiKey || c.kimiModelText != s.kimiModel ||
+               c.geminiKeyText != s.geminiApiKey || c.geminiModelText != s.geminiModel ||
+               c.gptKeyText != s.gptApiKey || c.gptModelText != s.gptModel
     }
 
     override fun apply() {
-        val settings = AppSettingsState.instance
-        val component = settingsComponent ?: return
-        settings.claudeApiKey = component.claudeKeyText
-        settings.claudeModel = component.claudeModelText
-        settings.kimiApiKey = component.kimiKeyText
-        settings.kimiModel = component.kimiModelText
-        settings.geminiApiKey = component.geminiKeyText
-        settings.geminiModel = component.geminiModelText
-        settings.gptApiKey = component.gptKeyText
-        settings.gptModel = component.gptModelText
+        val s = AppSettingsState.instance
+        val c = component ?: return
+        s.kimiApiKey = c.kimiKeyText; s.kimiModel = c.kimiModelText
+        s.geminiApiKey = c.geminiKeyText; s.geminiModel = c.geminiModelText
+        s.gptApiKey = c.gptKeyText; s.gptModel = c.gptModelText
     }
 
     override fun reset() {
-        val settings = AppSettingsState.instance
-        val component = settingsComponent ?: return
-        component.claudeKeyText = settings.claudeApiKey
-        component.claudeModelText = settings.claudeModel
-        component.kimiKeyText = settings.kimiApiKey
-        component.kimiModelText = settings.kimiModel
-        component.geminiKeyText = settings.geminiApiKey
-        component.geminiModelText = settings.geminiModel
-        component.gptKeyText = settings.gptApiKey
-        component.gptModelText = settings.gptModel
+        val s = AppSettingsState.instance
+        val c = component ?: return
+        c.kimiKeyText = s.kimiApiKey; c.kimiModelText = s.kimiModel
+        c.geminiKeyText = s.geminiApiKey; c.geminiModelText = s.geminiModel
+        c.gptKeyText = s.gptApiKey; c.gptModelText = s.gptModel
     }
 
-    override fun disposeUIResources() {
-        settingsComponent = null
-    }
+    override fun disposeUIResources() { component = null }
 }
