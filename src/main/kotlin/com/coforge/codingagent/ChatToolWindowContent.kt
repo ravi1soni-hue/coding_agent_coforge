@@ -203,22 +203,19 @@ class ChatToolWindowContent(private val project: Project) {
             }
             val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
                 isOpaque = false
-                // Run Tests button
-                add(createTerminalBtn("▶ Tests", "Run tests") {
-                    runTerminalCommand("Running tests...") { out, done ->
-                        if (isFlutter) TerminalExecutor.flutterTest(project, out, done)
-                        else TerminalExecutor.runTests(project, out, done)
-                    }
+                // Tests button → full agentic loop (run → fail → fix → re-run, up to 3×)
+                add(createTerminalBtn("▶ Tests", "Run tests + auto-fix failures (up to 3 attempts)") {
+                    startAgenticTestLoop(emptyList(), attempt = 1)
                 })
-                // Build button
-                add(createTerminalBtn("⚙ Build", "Build debug") {
+                // Build button → run and auto-invoke AI on failure
+                add(createTerminalBtn("⚙ Build", "Build debug (auto-fix on error)") {
                     runTerminalCommand("Building...") { out, done ->
                         if (isFlutter) TerminalExecutor.flutterBuild(project, out, done)
                         else TerminalExecutor.buildDebug(project, out, done)
                     }
                 })
-                // Analyze/Lint button
-                add(createTerminalBtn("🔍 Lint", "Run lint / analyze") {
+                // Lint button → run and auto-invoke AI on failure
+                add(createTerminalBtn("🔍 Lint", "Run lint / analyze (auto-fix on error)") {
                     runTerminalCommand("Analyzing...") { out, done ->
                         if (isFlutter) TerminalExecutor.flutterAnalyze(project, out, done)
                         else TerminalExecutor.runLint(project, out, done)
@@ -291,8 +288,14 @@ class ChatToolWindowContent(private val project: Project) {
 
     // ─── Terminal command runner ───────────────────────────────────────────────
 
+    /**
+     * Runs a terminal command and streams output to the terminal panel.
+     * On failure, automatically invokes the AI FIX chain — no button click needed.
+     * autoFix=false for commands where we only want to show output (e.g. successful builds).
+     */
     private fun runTerminalCommand(
         label: String,
+        autoFix: Boolean = true,
         executor: (onOutput: (String) -> Unit, onDone: (TerminalExecutor.CommandResult) -> Unit) -> Unit
     ) {
         SwingUtilities.invokeLater {
@@ -306,29 +309,61 @@ class ChatToolWindowContent(private val project: Project) {
             { result ->
                 SwingUtilities.invokeLater {
                     terminalOutput.append("\n${result.summary}\n")
-                    // Offer to explain failures to the AI
-                    if (!result.isSuccess) {
+                    if (!result.isSuccess && autoFix) {
                         val errors = result.output.lines()
                             .filter { it.contains("error", ignoreCase = true) || it.contains("FAILED", ignoreCase = true) }
-                            .take(20).joinToString("\n")
+                            .take(30).joinToString("\n")
                         if (errors.isNotBlank()) {
-                            val askBtn = JButton("Ask AI to fix these errors").apply {
-                                background = Color(35, 134, 54); foreground = Color.WHITE
-                                border = JBUI.Borders.empty(6, 12); isFocusPainted = false
-                                addActionListener {
-                                    prefillAndSend("Fix these build/test errors:\n```\n$errors\n```")
-                                    isVisible = false
-                                }
-                            }
-                            val btnRow = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
-                                background = Color(10, 12, 16); add(askBtn)
-                            }
-                            terminalPanel.add(btnRow, BorderLayout.SOUTH)
-                            terminalPanel.revalidate()
+                            // Auto-invoke AI — no button needed
+                            invokeAutoFix("Fix these build errors:\n```\n$errors\n```")
                         }
                     }
                 }
             }
+        )
+    }
+
+    /**
+     * Directly invokes the AI FIX chain without touching the input area.
+     * Used by auto-fix paths (terminal failures, build errors).
+     * The response is streamed into the chat panel like a normal agent response.
+     */
+    private fun invokeAutoFix(prompt: String) {
+        if (!inputArea.isEnabled) return   // already processing another request
+        if (conversationHistory.size >= 100) conversationHistory.subList(0, 40).clear()
+        conversationHistory.add(Message("user", prompt))
+        appendBubble("You", prompt)
+        setInputEnabled(false); stopBtn.isVisible = true
+        statusLabel.text = "Auto-fixing..."
+
+        val context = try { EditorContext.getSmartContext(project, taggedFiles.toList()) } catch (_: Exception) { "" }
+        val (streamArea, reasoningArea) = appendAgentBubble()
+
+        AiService.callAgentChain(
+            userMessage = prompt,
+            history     = conversationHistory.dropLast(1),
+            context     = context,
+            project     = project,
+            onStatus    = { s   -> SwingUtilities.invokeLater { statusLabel.text = s } },
+            onReasoning = { r   -> SwingUtilities.invokeLater {
+                reasoningArea.text = r
+                reasoningArea.parent?.isVisible = true
+                reasoningArea.parent?.revalidate()
+            }},
+            onToken     = { tok -> SwingUtilities.invokeLater { streamArea.append(tok); scrollToBottom() } },
+            onComplete  = { full -> SwingUtilities.invokeLater {
+                conversationHistory.add(Message("assistant", full))
+                val bodyPanel = streamArea.parent as? JPanel
+                if (bodyPanel != null && full.isNotBlank()) {
+                    bodyPanel.removeAll()
+                    parseMessageParts(full).forEach { bodyPanel.add(it) }
+                    val allChanges = parseAllFileChanges(full)
+                    if (allChanges.size >= 2) bodyPanel.add(createApplyAllButton(allChanges))
+                    bodyPanel.revalidate(); bodyPanel.repaint()
+                }
+                statusLabel.text = "Ready"; intentLabel.isVisible = false
+                stopBtn.isVisible = false; setInputEnabled(true); scrollToBottom()
+            }}
         )
     }
 
@@ -862,16 +897,8 @@ class ChatToolWindowContent(private val project: Project) {
             val msg = if (selected.size == changes.size) "All ${selected.size} files applied."
                       else "${selected.size} of ${changes.size} files applied."
             Messages.showInfoMessage(project, msg, "Done")
-            // Offer agentic test loop
-            val runAndFix = JOptionPane.showConfirmDialog(
-                contentPanel,
-                "Run tests and auto-fix failures? (up to 3 attempts)",
-                "Agentic Test Loop",
-                JOptionPane.YES_NO_OPTION
-            )
-            if (runAndFix == JOptionPane.YES_OPTION) {
-                startAgenticTestLoop(selected.map { it.path }, attempt = 1)
-            }
+            // Automatically run the agentic test loop — no opt-in needed
+            startAgenticTestLoop(selected.map { it.path }, attempt = 1)
         }
     }
 
@@ -886,13 +913,17 @@ class ChatToolWindowContent(private val project: Project) {
             return
         }
 
+        switchToChat()
         appendSystemMessage("🤖 Attempt $attempt/3 — running tests...")
-        terminalOutput.text = ""
-        terminalPanel.isVisible = true
+        SwingUtilities.invokeLater {
+            terminalOutput.text = "=== Test run attempt $attempt/3 ===\n"
+            terminalPanel.isVisible = true
+            terminalPanel.revalidate()
+        }
 
         val isFlutterProject = isFlutter
         val onOutput: (String) -> Unit = { line ->
-            SwingUtilities.invokeLater { terminalOutput.append(line); scrollToBottom() }
+            SwingUtilities.invokeLater { terminalOutput.append(line) }
         }
         val onDone: (TerminalExecutor.CommandResult) -> Unit = { result ->
             SwingUtilities.invokeLater {

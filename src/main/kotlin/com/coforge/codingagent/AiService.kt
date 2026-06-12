@@ -341,8 +341,10 @@ object AiService {
         val settings = AppSettingsState.instance
         if (settings.gptApiKey.isBlank()) return ""
         return try {
+            // maxTokens = 80: keeps latency low; 1-2 lines is all ghost-text needs
             callModelSync(settings.gptModel, settings.gptApiKey, gptInlineSystem,
-                "LANGUAGE: $language\nPREFIX:\n$prefix\nSUFFIX:\n$suffix\nCOMPLETION:", timeoutSec = 5)
+                "LANGUAGE: $language\nPREFIX:\n$prefix\nSUFFIX:\n$suffix\nCOMPLETION:",
+                timeoutSec = 5, maxTokens = 80)
                 .take(400)
         } catch (_: Exception) { "" }
     }
@@ -408,17 +410,17 @@ object AiService {
 
     private fun callModelSync(
         model: String, apiKey: String, system: String, user: String,
-        timeoutSec: Long = 30, images: List<String> = emptyList()
+        timeoutSec: Long = 30, images: List<String> = emptyList(), maxTokens: Int? = null
     ): String {
         if (apiKey.isBlank()) return ""
-        val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = false, images = images), timeoutSec = timeoutSec)
+        val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = false, images = images, maxTokens = maxTokens), timeoutSec = timeoutSec)
         val r = client.send(request, HttpResponse.BodyHandlers.ofString())
         return if (r.statusCode() == 200) parseBlocking(r.body()) else ""
     }
 
     // ─── HTTP helpers ─────────────────────────────────────────────────────────
 
-    private fun buildBody(model: String, system: String, user: String, stream: Boolean, images: List<String> = emptyList()): String {
+    private fun buildBody(model: String, system: String, user: String, stream: Boolean, images: List<String> = emptyList(), maxTokens: Int? = null): String {
         val userContent = if (images.isEmpty()) user else JsonArray().apply {
             add(JsonObject().apply { addProperty("type", "text"); addProperty("text", user) })
             images.forEach { b64 ->
@@ -435,6 +437,7 @@ object AiService {
             addProperty("model", model)
             addProperty("temperature", 0.2)
             if (stream) addProperty("stream", true)
+            if (maxTokens != null) addProperty("max_tokens", maxTokens)
             add("messages", JsonArray().apply {
                 add(JsonObject().apply { addProperty("role", "system"); addProperty("content", system) })
                 add(JsonObject().apply {
