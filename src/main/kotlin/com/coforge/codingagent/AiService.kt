@@ -3,6 +3,7 @@ package com.coforge.codingagent
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import java.net.URI
@@ -204,7 +205,15 @@ object AiService {
         onStatus("Gathering context...")
         val urlFuture    = CompletableFuture.supplyAsync { UrlContentFetcher.fetchAll(userMessage) }
         val searchFuture = CompletableFuture.supplyAsync { WebSearchService.fetchContextIfNeeded(userMessage, info.type) }
-        val indexFuture  = CompletableFuture.supplyAsync { project?.let { EditorContext.getIndexedContext(it, userMessage) } ?: "" }
+        val indexFuture  = CompletableFuture.supplyAsync {
+            project?.let { p ->
+                try {
+                    ApplicationManager.getApplication().runReadAction<String> {
+                        EditorContext.getIndexedContext(p, userMessage)
+                    }
+                } catch (_: Exception) { "" }
+            } ?: ""
+        }
 
         CompletableFuture.allOf(urlFuture, searchFuture, indexFuture).thenRun {
             if (stopRequested) return@thenRun

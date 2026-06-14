@@ -16,8 +16,8 @@ class AppSettingsState : PersistentStateComponent<AppSettingsState> {
     var gptApiKey: String = ""
 
     var kimiModel: String = "kimi-k2-thinking"
-    var geminiModel: String = "gemini-2-5-flash"
-    var gptModel: String = "gpt-5-2-chat"
+    var geminiModel: String = "gemini-2.5-flash"
+    var gptModel: String = "gpt-5.2"
 
     var inlineCompletionsEnabled: Boolean = true
 

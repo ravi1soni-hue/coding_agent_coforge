@@ -13,6 +13,7 @@ import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
@@ -76,7 +77,7 @@ class ChatToolWindowContent(private val project: Project) {
                 js("""window.__bridge = function(m){ ${q.inject("m")} }; window._bridgeReady(window.__bridge);""")
                 SwingUtilities.invokeLater { sendFileList() }
             }
-        }, browser?.cefBrowser ?: return)
+        }, browser!!.cefBrowser!!)
     }
 
     private fun loadUI() {
@@ -114,23 +115,37 @@ class ChatToolWindowContent(private val project: Project) {
         if (history.size >= 100) history.subList(0, 40).clear()
         history.add(Message("user", text))
 
-        val taggedVfs = EditorContext.getAllProjectFiles(project).filter { it.name in tagged }
-        val context   = EditorContext.getSmartContext(project, taggedVfs)
+        // Gather PSI context on a pooled thread with a read action.
+        // PSI / ProjectFileIndex APIs throw if called without a read lock
+        // (the CEF callback thread doesn't hold one).
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val taggedVfs: List<VirtualFile> = try {
+                ApplicationManager.getApplication().runReadAction<List<VirtualFile>> {
+                    EditorContext.getAllProjectFiles(project).filter { it.name in tagged }
+                }
+            } catch (_: Exception) { emptyList() }
 
-        AiService.callAgentChain(
-            userMessage = text,
-            history     = history.dropLast(1),
-            context     = context,
-            images      = images,
-            project     = project,
-            onStatus    = { s   -> push("status",    s)   },
-            onReasoning = { r   -> push("reasoning", r)   },
-            onToken     = { tok -> push("token",     tok) },
-            onComplete  = { full ->
-                history.add(Message("assistant", full))
-                push("complete", full)
-            }
-        )
+            val context: String = try {
+                ApplicationManager.getApplication().runReadAction<String> {
+                    EditorContext.getSmartContext(project, taggedVfs)
+                }
+            } catch (_: Exception) { "" }
+
+            AiService.callAgentChain(
+                userMessage = text,
+                history     = history.dropLast(1),
+                context     = context,
+                images      = images,
+                project     = project,
+                onStatus    = { s   -> push("status",    s)   },
+                onReasoning = { r   -> push("reasoning", r)   },
+                onToken     = { tok -> push("token",     tok) },
+                onComplete  = { full ->
+                    history.add(Message("assistant", full))
+                    push("complete", full)
+                }
+            )
+        }
     }
 
     private fun onRetry() {
@@ -320,8 +335,14 @@ class ChatToolWindowContent(private val project: Project) {
     }
 
     private fun sendFileList() {
-        val names = EditorContext.getAllProjectFiles(project).map { it.name }
-        pushRaw("""{"type":"file_list","data":${gson.toJson(names)}}""")
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val names: List<String> = try {
+                ApplicationManager.getApplication().runReadAction<List<String>> {
+                    EditorContext.getAllProjectFiles(project).map { it.name }
+                }
+            } catch (_: Exception) { emptyList() }
+            pushRaw("""{"type":"file_list","data":${gson.toJson(names)}}""")
+        }
     }
 
     private fun copy(text: String) =
