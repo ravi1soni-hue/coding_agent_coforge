@@ -49,27 +49,19 @@ object WebSearchService {
     )
     private fun nextUserAgent() = userAgents[uaIndexAtomic.getAndIncrement() % userAgents.size]
 
-    // ─── Main entry point ─────────────────────────────────────────────────────
-
-    fun fetchContextIfNeeded(
-        userMessage: String,
-        projectType: ProjectTypeDetector.ProjectType
-    ): String {
-        if (!shouldSearch(userMessage)) return ""
-
+    /**
+     * Run a single AI-provided search query and return results.
+     * Called by AiService with queries that Kimi explicitly requested — no rules about when to search.
+     */
+    fun search(query: String): String {
+        if (query.isBlank()) return ""
         val sb = StringBuilder()
 
-        // Tier 1: Official DDG Instant Answer API
-        instantAnswer(userMessage)?.let { sb.append("$it\n\n") }
+        // Instant answer first (fast, no rate-limit)
+        instantAnswer(query)?.let { sb.append("$it\n\n") }
 
-        // Tier 2: Direct documentation (open-ended — works for any topic)
-        directDocFetch(userMessage, projectType)?.let { sb.append("$it\n\n") }
-
-        // Tier 3: DDG Lite general search (always fires if tiers 1+2 returned little)
-        if (sb.length < 500) {
-            val query = buildSearchQuery(userMessage, projectType)
-            liteSearchAndFetch(query, maxResults = 2)?.let { sb.append(it) }
-        }
+        // General web search for the AI's exact query
+        liteSearchAndFetch(query, maxResults = 2)?.let { sb.append(it) }
 
         return sb.toString().trim()
     }
@@ -96,79 +88,8 @@ object WebSearchService {
         }
     }
 
-    // ─── Tier 2: Direct documentation — open-ended ───────────────────────────
-    //
-    // For known topic keywords → direct URL fetch (fast, authoritative)
-    // For UNKNOWN topics       → site:-scoped DDG search → fetch top result
-    // This means ANY library, ANY topic is covered — no whitelist needed.
-
-    fun directDocFetch(query: String, projectType: ProjectTypeDetector.ProjectType): String? {
-        val lower = query.lowercase()
-        val results = mutableListOf<String>()
-
-        // ── pub.dev: any snake_case word is a candidate package name ──────────
-        if (projectType == ProjectTypeDetector.ProjectType.FLUTTER || lower.contains("flutter") || lower.contains("dart")) {
-            extractAnyPackageName(lower)?.let { pkg ->
-                try {
-                    val result = UrlContentFetcher.fetch("https://pub.dev/packages/$pkg")
-                    if (result.content.length > 50) results.add("pub.dev / $pkg:\n${result.content.take(3000)}")
-                } catch (_: Exception) {
-                    // Package not found — fall through to general search
-                }
-            }
-        }
-
-        // ── Kotlin docs ───────────────────────────────────────────────────────
-        if (lower.contains("kotlin") || lower.contains("coroutine") || lower.contains("flow") ||
-            lower.contains("suspend") || lower.contains("kmp") || lower.contains("multiplatform")) {
-            val topic = mapKotlinTopic(lower)
-            if (topic != null) {
-                // Known topic — fetch directly
-                fetch("https://kotlinlang.org/docs/$topic.html", isDdgLite = false)
-                    ?.let { cleanDocHtml(it) }?.takeIf { it.length > 100 }
-                    ?.let { results.add("Kotlin docs:\n${it.take(2000)}") }
-            } else {
-                // Unknown topic — search within kotlinlang.org
-                fetchTopResultFor("site:kotlinlang.org $lower")
-                    ?.let { results.add("Kotlin docs:\n${it.take(2000)}") }
-            }
-        }
-
-        // ── Android developer docs ────────────────────────────────────────────
-        if (projectType == ProjectTypeDetector.ProjectType.ANDROID_NATIVE ||
-            lower.contains("android") || lower.contains("compose") || lower.contains("jetpack")) {
-            val path = mapAndroidPath(lower)
-            if (path != null) {
-                fetch("https://developer.android.com/$path", isDdgLite = false)
-                    ?.let { cleanDocHtml(it) }?.takeIf { it.length > 100 }
-                    ?.let { results.add("Android docs:\n${it.take(2000)}") }
-            } else {
-                // Unknown topic — search within developer.android.com
-                fetchTopResultFor("site:developer.android.com $lower")
-                    ?.let { results.add("Android docs:\n${it.take(2000)}") }
-            }
-        }
-
-        // ── Flutter docs ──────────────────────────────────────────────────────
-        if (lower.contains("flutter")) {
-            val path = mapFlutterPath(lower)
-            if (path != null) {
-                fetch("https://docs.flutter.dev/$path", isDdgLite = false)
-                    ?.let { cleanDocHtml(it) }?.takeIf { it.length > 100 }
-                    ?.let { results.add("Flutter docs:\n${it.take(2000)}") }
-            } else {
-                // Unknown topic — search within docs.flutter.dev
-                fetchTopResultFor("site:docs.flutter.dev $lower")
-                    ?.let { results.add("Flutter docs:\n${it.take(2000)}") }
-            }
-        }
-
-        return results.joinToString("\n\n---\n\n").takeIf { it.isNotBlank() }
-    }
-
     /**
-     * Searches DDG Lite with a site: query and fetches the first real result.
-     * Used when we don't have a hard-coded path for the topic asked.
+     * Searches DDG Lite for the given query and fetches the first real result.
      */
     private fun fetchTopResultFor(siteQuery: String): String? {
         val urls = liteSearchUrls(siteQuery, maxResults = 1) ?: return null
@@ -229,138 +150,6 @@ object WebSearchService {
             }
             .distinct().take(max).toList()
 
-    // ─── shouldSearch — open-ended, no fixed library list ────────────────────
-    //
-    // Searches when the query is about something that could have changed since
-    // the model's training cutoff or needs current documentation.
-    // No hardcoded library names — any library triggers search.
-
-    fun shouldSearch(message: String): Boolean {
-        val lower = message.lowercase()
-
-        // Explicit doc requests
-        if (Regex("""\b(search|documentation|docs|official|changelog|release|migration|upgrade|version)\b""")
-                .containsMatchIn(lower)) return true
-
-        // Any version number mentioned
-        if (Regex("""\d+\.\d+""").containsMatchIn(lower)) return true
-
-        // Any snake_case identifier = almost certainly a library/package name
-        // e.g. go_router, flutter_riverpod, retrofit2, moko_mvvm, patrol_finders
-        if (Regex("""\b[a-z][a-z0-9]*_[a-z][a-z0-9_]*\b""").containsMatchIn(lower)) return true
-
-        // Implementation-type questions about specific tech
-        if (Regex("""\b(how (do|to|can)|implement|integrate|setup|configure|install|add|use)\b""")
-                .containsMatchIn(lower) &&
-            Regex("""\b(library|plugin|package|sdk|api|framework|gradle|pubspec|dependency|module)\b""")
-                .containsMatchIn(lower)) return true
-
-        // Long task descriptions (Jira/requirements paste)
-        if (message.trim().length > 300) return true
-
-        return false
-    }
-
-    fun buildSearchQuery(message: String, projectType: ProjectTypeDetector.ProjectType): String {
-        val platform = when (projectType) {
-            ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter Dart"
-            ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android Kotlin"
-            ProjectTypeDetector.ProjectType.UNKNOWN -> "Android Kotlin"
-        }
-        val cleaned = message
-            .replace(Regex("```[\\s\\S]*?```"), "")
-            .replace(Regex("<[^>]+>"), "")
-            .replace(Regex("\\s+"), " ")
-            .trim().take(120)
-        return "$platform $cleaned"
-    }
-
-    // ─── Package name extraction — open-ended ─────────────────────────────────
-    //
-    // Extracts ANY snake_case word from the query as a pub.dev package candidate.
-    // No whitelist — works for new packages released after this code was written.
-
-    private fun extractAnyPackageName(lower: String): String? {
-        // Words that look like package names but are common Dart/Flutter code patterns
-        val falsePositives = setOf(
-            "build_context", "build_runner", "build_gradle", "on_pressed", "on_tap",
-            "on_changed", "text_style", "box_decoration", "edge_insets", "font_weight",
-            "font_size", "border_radius", "on_create", "on_resume", "on_pause",
-            "on_destroy", "view_model", "data_binding", "view_binding", "use_state",
-            "use_effect", "on_submit", "on_save", "key_value", "content_type"
-        )
-
-        return Regex("""\b([a-z][a-z0-9]*(?:_[a-z0-9]+){1,5})\b""")
-            .findAll(lower)
-            .map { it.groupValues[1] }
-            .filter { it.length >= 4 && it !in falsePositives }
-            .firstOrNull()
-    }
-
-    // ─── Known topic maps (direct URL routes) ─────────────────────────────────
-    // These cover the COMMON cases for speed. Unknown topics fall through to
-    // site:-scoped DDG search above — so nothing is missed.
-
-    private fun mapKotlinTopic(lower: String): String? = when {
-        lower.contains("coroutine") -> "coroutines-overview"
-        lower.contains("stateflow") || (lower.contains("flow") && lower.contains("state")) -> "stateflow-and-sharedflow"
-        lower.contains("sharedflow") -> "stateflow-and-sharedflow"
-        lower.contains("flow") -> "flow"
-        lower.contains("channel") -> "channels"
-        lower.contains("suspend") -> "composing-suspending-functions"
-        lower.contains("sealed") -> "sealed-classes"
-        lower.contains("extension fun") || lower.contains("extension function") -> "extensions"
-        lower.contains("inline") && lower.contains("fun") -> "inline-functions"
-        lower.contains("delegation") || lower.contains("delegate") -> "delegation"
-        lower.contains("companion") -> "object-declarations"
-        lower.contains("data class") -> "data-classes"
-        lower.contains("enum") -> "enum-classes"
-        lower.contains("generics") -> "generics"
-        lower.contains("lambda") -> "lambdas"
-        lower.contains("scope function") || lower.contains("let(") || lower.contains(".run(") || lower.contains(".apply(") -> "scope-functions"
-        else -> null  // → falls through to site:kotlinlang.org search
-    }
-
-    private fun mapAndroidPath(lower: String): String? = when {
-        lower.contains("compose") && lower.contains("navigation") -> "jetpack/compose/navigation"
-        lower.contains("compose") && lower.contains("state") -> "jetpack/compose/state"
-        lower.contains("compose") && lower.contains("layout") -> "jetpack/compose/layouts/basics"
-        lower.contains("compose") && lower.contains("animation") -> "jetpack/compose/animation/overview"
-        lower.contains("compose") && lower.contains("test") -> "jetpack/compose/testing"
-        lower.contains("compose") && lower.contains("side effect") -> "jetpack/compose/side-effects"
-        lower.contains("compose") && lower.contains("theming") -> "jetpack/compose/designsystems/material3"
-        lower.contains("compose") -> "jetpack/compose/documentation"
-        lower.contains("viewmodel") -> "topic/libraries/architecture/viewmodel"
-        lower.contains("datastore") -> "topic/libraries/architecture/datastore"
-        lower.contains("workmanager") -> "topic/libraries/architecture/workmanager"
-        lower.contains("paging") -> "topic/libraries/architecture/paging/v3-overview"
-        lower.contains("hilt") -> "training/dependency-injection/hilt-android"
-        lower.contains("room") -> "training/data-storage/room"
-        lower.contains("lifecycle") -> "topic/libraries/architecture/lifecycle"
-        lower.contains("navigation") -> "guide/navigation"
-        lower.contains("biometric") -> "training/sign-in/biometric-auth"
-        lower.contains("media3") || lower.contains("exoplayer") -> "guide/topics/media/exoplayer"
-        lower.contains("camerax") -> "training/camerax"
-        lower.contains("permission") -> "training/permissions"
-        else -> null  // → falls through to site:developer.android.com search
-    }
-
-    private fun mapFlutterPath(lower: String): String? = when {
-        lower.contains("navigation") || lower.contains("routing") -> "ui/navigation"
-        lower.contains("state management") || lower.contains("state mgmt") -> "data-and-backend/state-mgmt/intro"
-        lower.contains("animation") -> "ui/animations"
-        lower.contains("test") -> "testing/overview"
-        lower.contains("platform channel") -> "platform-integration/platform-channels"
-        lower.contains("widget") -> "ui/widgets/basics"
-        lower.contains("accessibility") -> "ui/accessibility"
-        lower.contains("localization") || lower.contains("l10n") -> "ui/accessibility/internationalization"
-        lower.contains("async") || lower.contains("future") || lower.contains("stream") -> "cookbook/networking/background-parsing"
-        lower.contains("network") || lower.contains("http") -> "cookbook/networking/fetch-data"
-        lower.contains("json") -> "data-and-backend/serialization/json"
-        lower.contains("firebase") -> "data-and-backend/firebase"
-        lower.contains("flavor") -> "deployment/flavors"
-        else -> null  // → falls through to site:docs.flutter.dev search
-    }
 
     // ─── HTTP helpers ─────────────────────────────────────────────────────────
 
