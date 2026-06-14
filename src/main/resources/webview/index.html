@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coforge AI</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:           #0f0f10;
+  --bg-1:         #1a1a1b;
+  --bg-2:         #242425;
+  --bg-3:         #2e2e2f;
+  --border:       #353537;
+  --border-soft:  #2a2a2c;
+  --text:         #e8e8e8;
+  --text-2:       #9a9a9a;
+  --text-3:       #606062;
+  --accent:       #c17a5e;
+  --accent-2:     #4a90d9;
+  --accent-green: #3fb950;
+  --accent-red:   #f85149;
+  --accent-purple:#bc8cff;
+  --code-bg:      #161618;
+  --user-bg:      #1e1e1f;
+  --radius:       12px;
+  --radius-sm:    6px;
+  --font:         -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --shadow:       0 4px 24px rgba(0,0,0,0.4);
+}
+
+html, body {
+  height: 100%; background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 14px; line-height: 1.6;
+  overflow: hidden; user-select: none;
+}
+
+/* ─── Layout ─────────────────────────────────────────────────────── */
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ─── Header ─────────────────────────────────────────────────────── */
+#header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px; height: 44px; min-height: 44px;
+  background: var(--bg-1); border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.header-left { display: flex; align-items: center; gap: 10px; }
+.logo {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(135deg, #c17a5e, #8b5cf6);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px; color: #fff;
+}
+.logo-name { font-weight: 700; font-size: 13px; color: var(--text); }
+#model-chain {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--text-3);
+}
+.model-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text-3);
+  transition: background 0.3s;
+}
+.model-dot.active { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.model-sep { color: var(--border); }
+.header-right { display: flex; align-items: center; gap: 2px; }
+.icon-btn {
+  width: 30px; height: 30px; border-radius: var(--radius-sm); border: none;
+  background: transparent; color: var(--text-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
+  transition: background 0.15s, color 0.15s;
+}
+.icon-btn:hover { background: var(--bg-2); color: var(--text); }
+
+/* ─── Chat container ─────────────────────────────────────────────── */
+#chat-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+#messages {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  padding: 20px 0 8px; scroll-behavior: smooth;
+}
+#messages::-webkit-scrollbar { width: 4px; }
+#messages::-webkit-scrollbar-track { background: transparent; }
+#messages::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 2px; }
+
+.msg-row {
+  display: flex; padding: 4px 20px; max-width: 780px; margin: 0 auto;
+  width: 100%; animation: fadeSlideIn 0.2s ease;
+}
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* User message */
+.msg-row.user { justify-content: flex-end; margin-bottom: 4px; }
+.msg-row.user .bubble {
+  background: var(--user-bg); border: 1px solid var(--border-soft);
+  border-radius: var(--radius) var(--radius) 4px var(--radius);
+  padding: 10px 14px; max-width: 75%; font-size: 14px; line-height: 1.6;
+  color: var(--text); word-break: break-word; user-select: text;
+}
+
+/* Assistant message */
+.msg-row.assistant { flex-direction: column; margin-bottom: 8px; }
+.msg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ai-avatar {
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(135deg, #c17a5e, #8b5cf6);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 11px; color: #fff;
+}
+.ai-name { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.msg-body {
+  padding-left: 32px; color: var(--text); font-size: 14px; line-height: 1.7;
+  word-break: break-word; user-select: text;
+}
+
+/* Streaming cursor */
+.streaming .msg-body::after {
+  content: '▋'; animation: blink 0.8s step-start infinite;
+  color: var(--accent); margin-left: 2px; font-size: 13px;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Reasoning panel */
+.reasoning-block {
+  margin: 0 0 10px 0; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft); overflow: hidden;
+}
+.reasoning-toggle {
+  display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+  background: var(--bg-1); cursor: pointer; font-size: 11px;
+  color: var(--text-3); border: none; width: 100%; text-align: left;
+  transition: background 0.15s;
+}
+.reasoning-toggle:hover { background: var(--bg-2); }
+.reasoning-toggle .chevron { transition: transform 0.2s; }
+.reasoning-toggle.open .chevron { transform: rotate(90deg); }
+.reasoning-content {
+  display: none; padding: 10px 12px; font-family: var(--font-mono);
+  font-size: 11px; color: var(--text-3); background: var(--bg);
+  max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+}
+.reasoning-content.visible { display: block; }
+
+/* Action bar */
+.msg-actions {
+  display: flex; align-items: center; gap: 2px;
+  padding: 6px 0 0 32px; opacity: 0; transition: opacity 0.15s;
+}
+.msg-row:hover .msg-actions { opacity: 1; }
+.act-btn {
+  padding: 3px 8px; border-radius: 4px; border: none;
+  background: transparent; color: var(--text-3); cursor: pointer;
+  font-size: 11px; font-family: var(--font); transition: all 0.15s;
+}
+.act-btn:hover { background: var(--bg-2); color: var(--text); }
+
+/* ─── Typing indicator ───────────────────────────────────────────── */
+#typing { display: none; padding: 8px 20px; max-width: 780px; margin: 0 auto; width: 100%; }
+#typing.visible { display: flex; align-items: center; gap: 8px; }
+#typing .ai-avatar { width: 24px; height: 24px; font-size: 11px; }
+.dots { display: flex; gap: 4px; }
+.dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--text-3);
+  animation: dotBounce 1.2s ease infinite;
+}
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotBounce {
+  0%,60%,100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+/* ─── Welcome screen ─────────────────────────────────────────────── */
+#welcome {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; gap: 24px; padding: 20px;
+  animation: fadeSlideIn 0.3s ease;
+}
+.welcome-logo {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: linear-gradient(135deg, #c17a5e, #8b5cf6);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 28px; color: #fff;
+  box-shadow: 0 8px 32px rgba(193,122,94,0.3);
+}
+.welcome-title { font-size: 22px; font-weight: 700; color: var(--text); }
+.welcome-sub   { font-size: 13px; color: var(--text-3); text-align: center; max-width: 320px; }
+.welcome-chips { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 380px; }
+.chip {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-radius: var(--radius);
+  background: var(--bg-1); border: 1px solid var(--border-soft);
+  cursor: pointer; transition: all 0.15s; text-align: left;
+}
+.chip:hover { background: var(--bg-2); border-color: var(--border); transform: translateY(-1px); }
+.chip-icon { font-size: 18px; flex-shrink: 0; }
+.chip-text  { font-size: 13px; font-weight: 600; color: var(--text); }
+.chip-sub   { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+
+/* ─── Markdown styles ────────────────────────────────────────────── */
+.md h1 { font-size: 20px; font-weight: 700; margin: 16px 0 8px; color: var(--text); }
+.md h2 { font-size: 17px; font-weight: 700; margin: 14px 0 6px; color: var(--text); }
+.md h3 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; color: var(--text); }
+.md p  { margin: 6px 0; }
+.md ul, .md ol { padding-left: 20px; margin: 6px 0; }
+.md li { margin: 3px 0; }
+.md code {
+  font-family: var(--font-mono); font-size: 12px; background: var(--bg-2);
+  color: #c9d1d9; padding: 1px 5px; border-radius: 4px;
+}
+.md blockquote {
+  border-left: 3px solid var(--border); padding-left: 12px;
+  margin: 8px 0; color: var(--text-2);
+}
+.md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.md a  { color: var(--accent-2); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md strong { font-weight: 700; color: var(--text); }
+.md em { font-style: italic; color: var(--text-2); }
+.md del { text-decoration: line-through; color: var(--text-3); }
+
+/* ─── Code block ─────────────────────────────────────────────────── */
+.code-block {
+  margin: 10px 0; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft); overflow: hidden;
+}
+.code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px; background: var(--bg-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.code-lang {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  color: var(--text-3); letter-spacing: 0.08em;
+}
+.code-copy {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px; border: none;
+  background: var(--bg-3); color: var(--text-2); cursor: pointer;
+  font-family: var(--font); transition: all 0.15s;
+}
+.code-copy:hover { background: var(--border); color: var(--text); }
+.code-copy.copied { color: var(--accent-green); }
+pre.code-content {
+  background: var(--code-bg); padding: 14px 16px; overflow-x: auto;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+  color: #c9d1d9; margin: 0;
+}
+pre.code-content::-webkit-scrollbar { height: 4px; }
+pre.code-content::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 2px; }
+
+/* Syntax tokens */
+.tok-kw   { color: #ff7b72; }
+.tok-str  { color: #a5d6ff; }
+.tok-num  { color: #79c0ff; }
+.tok-cm   { color: #8b949e; font-style: italic; }
+.tok-fn   { color: #d2a8ff; }
+.tok-cls  { color: #ffa657; }
+.tok-op   { color: #ff7b72; }
+.tok-ann  { color: #ffa657; }
+
+/* ─── File change proposal ───────────────────────────────────────── */
+.file-change {
+  margin: 8px 0; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft); overflow: hidden;
+}
+.file-change-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: var(--bg-2);
+}
+.file-change-left  { display: flex; align-items: center; gap: 8px; }
+.file-badge {
+  font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+  letter-spacing: 0.06em;
+}
+.badge-new  { background: rgba(63,185,80,0.15);  color: #3fb950; }
+.badge-edit { background: rgba(74,144,217,0.15); color: #4a90d9; }
+.file-path  {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+}
+.file-change-actions { display: flex; gap: 6px; }
+.fc-btn {
+  padding: 4px 10px; border-radius: 4px; border: none; cursor: pointer;
+  font-size: 11px; font-family: var(--font); font-weight: 600;
+  transition: all 0.15s;
+}
+.fc-skip  { background: transparent; color: var(--text-3); }
+.fc-skip:hover { color: var(--text); }
+.fc-diff  { background: var(--bg-3); color: var(--text-2); }
+.fc-diff:hover  { color: var(--text); }
+.fc-apply { background: rgba(63,185,80,0.15); color: var(--accent-green); border: 1px solid rgba(63,185,80,0.3); }
+.fc-apply:hover { background: rgba(63,185,80,0.25); }
+.fc-apply.done  { opacity: 0.5; cursor: default; }
+
+/* ─── Apply-all bar ──────────────────────────────────────────────── */
+.apply-all-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 12px 0; padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--bg-1); border: 1px solid var(--border-soft);
+}
+.apply-all-bar .info { font-size: 12px; color: var(--text-2); }
+.apply-all-btn {
+  padding: 7px 16px; border-radius: var(--radius-sm); border: none;
+  background: var(--accent-green); color: #000; font-weight: 700;
+  font-size: 12px; cursor: pointer; transition: opacity 0.15s;
+}
+.apply-all-btn:hover { opacity: 0.85; }
+
+/* ─── Terminal drawer ────────────────────────────────────────────── */
+#terminal-drawer {
+  border-top: 1px solid var(--border-soft); background: #0d0f0d;
+  display: flex; flex-direction: column; flex-shrink: 0;
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+#terminal-drawer.open { max-height: 220px; }
+.terminal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 12px; background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--border-soft);
+}
+.terminal-title { font-size: 10px; font-weight: 700; color: var(--text-3); letter-spacing: 0.08em; }
+.terminal-close { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 14px; }
+.terminal-close:hover { color: var(--text); }
+#terminal-output {
+  flex: 1; overflow-y: auto; padding: 10px 14px;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.7;
+  color: #98c379; white-space: pre-wrap; word-break: break-all;
+}
+#terminal-output::-webkit-scrollbar { width: 3px; }
+#terminal-output::-webkit-scrollbar-thumb { background: #333; }
+.term-err  { color: #e06c75; }
+.term-warn { color: #e5c07b; }
+.term-info { color: #61afef; }
+.term-ok   { color: #98c379; }
+
+/* ─── Input area ─────────────────────────────────────────────────── */
+#input-container {
+  flex-shrink: 0; padding: 8px 16px 12px; background: var(--bg);
+  border-top: 1px solid var(--border-soft);
+}
+#input-box {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-1); overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+#input-box:focus-within {
+  border-color: rgba(193,122,94,0.4);
+  box-shadow: 0 0 0 3px rgba(193,122,94,0.08);
+}
+
+/* Attach pills */
+#attach-bar {
+  display: none; padding: 8px 12px 0; gap: 6px; flex-wrap: wrap;
+}
+#attach-bar.has-items { display: flex; }
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px 2px 6px; border-radius: 20px;
+  background: rgba(74,144,217,0.12); border: 1px solid rgba(74,144,217,0.25);
+  font-size: 11px; color: var(--accent-2); white-space: nowrap;
+}
+.pill-remove {
+  background: none; border: none; cursor: pointer; color: inherit;
+  font-size: 13px; line-height: 1; padding: 0; opacity: 0.6;
+}
+.pill-remove:hover { opacity: 1; }
+.img-pill { background: rgba(188,140,255,0.1); border-color: rgba(188,140,255,0.25); color: var(--accent-purple); }
+.img-thumb { width: 20px; height: 20px; border-radius: 3px; object-fit: cover; }
+
+/* File picker dropdown */
+#file-picker {
+  display: none; position: absolute; bottom: 100%; left: 0; right: 0;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); max-height: 200px; overflow-y: auto;
+  z-index: 100; margin-bottom: 4px; box-shadow: var(--shadow);
+}
+#file-picker.open { display: block; }
+.file-item {
+  padding: 7px 12px; cursor: pointer; font-size: 12px;
+  font-family: var(--font-mono); color: var(--text-2);
+  transition: background 0.1s;
+}
+.file-item:hover, .file-item.selected { background: var(--bg-3); color: var(--text); }
+#file-picker-wrap { position: relative; }
+
+/* Textarea */
+#input {
+  width: 100%; padding: 12px 14px 4px; background: transparent;
+  border: none; color: var(--text); font-family: var(--font); font-size: 14px;
+  resize: none; outline: none; line-height: 1.6; min-height: 44px; max-height: 180px;
+  overflow-y: auto;
+}
+#input::placeholder { color: var(--text-3); }
+#input::-webkit-scrollbar { width: 3px; }
+
+/* Toolbar */
+#toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 10px 8px;
+}
+.toolbar-left  { display: flex; align-items: center; gap: 4px; }
+.toolbar-right { display: flex; align-items: center; gap: 6px; }
+.run-chip {
+  padding: 3px 9px; border-radius: 4px; border: 1px solid var(--border-soft);
+  background: transparent; color: var(--text-3); cursor: pointer;
+  font-size: 11px; font-family: var(--font); transition: all 0.15s;
+}
+.run-chip:hover { background: var(--bg-2); color: var(--text); border-color: var(--border); }
+#status-label { font-size: 11px; color: var(--text-3); padding: 0 4px; }
+.intent-badge {
+  font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 3px;
+  letter-spacing: 0.06em; display: none;
+}
+.toolbar-sep { width: 1px; height: 14px; background: var(--border); margin: 0 3px; }
+.attach-btn {
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  font-size: 16px; padding: 2px 4px; transition: color 0.15s;
+}
+.attach-btn:hover { color: var(--text); }
+#send-btn {
+  width: 30px; height: 30px; border-radius: 50%; border: none;
+  background: var(--accent); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; flex-shrink: 0;
+}
+#send-btn:hover { filter: brightness(1.1); transform: scale(1.05); }
+#send-btn:disabled { background: var(--bg-3); cursor: default; transform: none; filter: none; }
+#send-btn svg { pointer-events: none; }
+#stop-btn {
+  display: none; padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(248,81,73,0.3);
+  background: rgba(248,81,73,0.1); color: var(--accent-red); cursor: pointer;
+  font-size: 11px; font-family: var(--font); font-weight: 600;
+}
+#stop-btn.visible { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ─── Diff view ──────────────────────────────────────────────────── */
+#diff-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  z-index: 1000; align-items: center; justify-content: center;
+}
+#diff-overlay.open { display: flex; }
+#diff-panel {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius); width: min(90vw, 720px);
+  max-height: 80vh; display: flex; flex-direction: column;
+  box-shadow: var(--shadow);
+}
+.diff-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border-soft);
+}
+.diff-title { font-weight: 700; font-size: 13px; }
+.diff-close { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 18px; }
+#diff-content { flex: 1; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; }
+.diff-line { display: flex; line-height: 1.7; }
+.diff-line-num { width: 40px; flex-shrink: 0; padding: 0 8px; color: var(--text-3); text-align: right; background: var(--bg-2); user-select: none; }
+.diff-line-text { flex: 1; padding: 0 12px; white-space: pre-wrap; word-break: break-all; }
+.diff-add  { background: rgba(63,185,80,0.08);  } .diff-add  .diff-line-text::before { content: '+'; color: var(--accent-green); margin-right: 6px; }
+.diff-rem  { background: rgba(248,81,73,0.08);  } .diff-rem  .diff-line-text::before { content: '-'; color: var(--accent-red);   margin-right: 6px; }
+.diff-same { } .diff-same .diff-line-text::before { content: ' '; margin-right: 6px; }
+.diff-footer { padding: 12px 16px; border-top: 1px solid var(--border-soft); display: flex; justify-content: flex-end; gap: 8px; }
+.diff-cancel { padding: 7px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; font-family: var(--font); }
+.diff-apply  { padding: 7px 14px; border-radius: var(--radius-sm); border: none; background: var(--accent-green); color: #000; font-weight: 700; cursor: pointer; font-family: var(--font); }
+
+/* ─── Apply All dialog ───────────────────────────────────────────── */
+#apply-all-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  z-index: 1000; align-items: center; justify-content: center;
+}
+#apply-all-overlay.open { display: flex; }
+#apply-all-panel {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius); width: min(90vw, 560px);
+  max-height: 70vh; display: flex; flex-direction: column;
+  box-shadow: var(--shadow);
+}
+.apply-all-h { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between; }
+.apply-all-h h3 { font-size: 14px; font-weight: 700; }
+#apply-all-list { flex: 1; overflow-y: auto; padding: 8px 16px; }
+.apply-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
+.apply-row:last-child { border-bottom: none; }
+.apply-row input[type=checkbox] { accent-color: var(--accent-green); width: 14px; height: 14px; }
+.apply-row-path { flex: 1; font-family: var(--font-mono); font-size: 12px; color: var(--text); }
+.apply-all-footer { padding: 12px 16px; border-top: 1px solid var(--border-soft); display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <div id="header">
+    <div class="header-left">
+      <div class="logo">C</div>
+      <span class="logo-name">Coforge AI</span>
+      <div id="model-chain">
+        <div class="model-dot" id="dot-kimi" title="Kimi K2"></div>
+        <span class="model-sep">Kimi</span>
+        <span class="model-sep">·</span>
+        <div class="model-dot" id="dot-gemini" title="Gemini"></div>
+        <span class="model-sep">Gemini</span>
+        <span class="model-sep">·</span>
+        <div class="model-dot" id="dot-gpt" title="GPT-5"></div>
+        <span class="model-sep">GPT-5</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn" title="New chat" onclick="App.reset()">⟳</button>
+      <button class="icon-btn" title="Settings" onclick="App.openSettings()">⚙</button>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div id="chat-container">
+    <div id="messages">
+      <!-- Welcome screen -->
+      <div id="welcome">
+        <div class="welcome-logo">C</div>
+        <div class="welcome-title">Coforge AI Agent</div>
+        <div class="welcome-sub">Kimi reasons · Gemini reviews · GPT-5 implements · Vision enabled</div>
+        <div class="welcome-chips">
+          <div class="chip" onclick="App.prefill('Explain how this code works:\n\n```\n\n```')">
+            <span class="chip-icon">💡</span>
+            <div><div class="chip-text">Explain Code</div><div class="chip-sub">Deep walkthrough with context</div></div>
+          </div>
+          <div class="chip" onclick="App.prefill('Fix the bug in this code:\n\n```\n\n```')">
+            <span class="chip-icon">🐛</span>
+            <div><div class="chip-text">Fix a Bug</div><div class="chip-sub">Trace, diagnose and patch</div></div>
+          </div>
+          <div class="chip" onclick="App.prefill('Implement: ')">
+            <span class="chip-icon">🏗️</span>
+            <div><div class="chip-text">Build a Feature</div><div class="chip-sub">Architecture → code → tests</div></div>
+          </div>
+          <div class="chip" onclick="App.prefill('Write comprehensive tests for:\n\n```\n\n```')">
+            <span class="chip-icon">🧪</span>
+            <div><div class="chip-text">Write Tests</div><div class="chip-sub">Unit, widget, integration</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Typing indicator -->
+    <div id="typing">
+      <div class="ai-avatar">C</div>
+      <div class="dots">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      </div>
+    </div>
+
+    <!-- Terminal drawer -->
+    <div id="terminal-drawer">
+      <div class="terminal-header">
+        <span class="terminal-title">TERMINAL</span>
+        <button class="terminal-close" onclick="App.closeTerminal()">✕</button>
+      </div>
+      <div id="terminal-output"></div>
+    </div>
+  </div>
+
+  <!-- Input container -->
+  <div id="input-container">
+    <div id="input-box">
+      <div id="attach-bar"></div>
+      <div id="file-picker-wrap">
+        <div id="file-picker"></div>
+        <textarea id="input" placeholder="Message Coforge AI... (@ to tag file, ⇧Enter for newline)" rows="1"></textarea>
+      </div>
+      <div id="toolbar">
+        <div class="toolbar-left">
+          <span id="status-label"></span>
+          <span id="intent-badge" class="intent-badge"></span>
+          <button id="stop-btn" onclick="App.stop()">⬛ Stop</button>
+          <div class="toolbar-sep"></div>
+          <button class="run-chip" onclick="App.runTests()">▶ Tests</button>
+          <button class="run-chip" onclick="App.runBuild()">⚙ Build</button>
+          <button class="run-chip" onclick="App.runLint()">✓ Lint</button>
+        </div>
+        <div class="toolbar-right">
+          <button class="attach-btn" title="Attach image" onclick="App.pickImage()">📎</button>
+          <button id="send-btn" onclick="App.send()" title="Send (Enter)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Diff overlay -->
+<div id="diff-overlay" onclick="if(event.target===this) App.closeDiff()">
+  <div id="diff-panel">
+    <div class="diff-header">
+      <span class="diff-title" id="diff-title">Preview Changes</span>
+      <button class="diff-close" onclick="App.closeDiff()">✕</button>
+    </div>
+    <div id="diff-content"></div>
+    <div class="diff-footer">
+      <button class="diff-cancel" onclick="App.closeDiff()">Cancel</button>
+      <button class="diff-apply" id="diff-apply-btn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Apply All overlay -->
+<div id="apply-all-overlay" onclick="if(event.target===this) App.closeApplyAll()">
+  <div id="apply-all-panel">
+    <div class="apply-all-h">
+      <h3>Apply Changes</h3>
+      <button class="diff-close" onclick="App.closeApplyAll()">✕</button>
+    </div>
+    <div id="apply-all-list"></div>
+    <div class="apply-all-footer">
+      <button class="diff-cancel" onclick="App.closeApplyAll()">Cancel</button>
+      <button class="diff-apply" onclick="App.confirmApplyAll()">Apply Selected</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Bridge ───────────────────────────────────────────────────────────────────
+function sendToKotlin(msg) {
+  if (window.__kotlinBridge) window.__kotlinBridge(JSON.stringify(msg));
+}
+// Called by Kotlin after page load to inject the real bridge
+window.injectBridge = function(fn) { window.__kotlinBridge = fn; };
+
+// Called by Kotlin to push events into the page
+window.onKotlinMessage = function(data) {
+  const msg = typeof data === 'string' ? JSON.parse(data) : data;
+  switch(msg.type) {
+    case 'token':          App.onToken(msg.data); break;
+    case 'reasoning':      App.onReasoning(msg.data); break;
+    case 'status':         App.setStatus(msg.data); break;
+    case 'model_active':   App.setModelActive(msg.model); break;
+    case 'complete':       App.onComplete(msg.data); break;
+    case 'file_list':      App.onFileList(msg.data); break;
+    case 'terminal_line':  App.appendTerminal(msg.data, msg.cls); break;
+    case 'terminal_done':  App.onTerminalDone(msg.success, msg.summary); break;
+    case 'apply_success':  App.onApplySuccess(msg.path); break;
+    case 'apply_error':    App.onApplyError(msg.path, msg.error); break;
+    case 'session_reset':  App.clearMessages(); break;
+    case 'prefill':        App.prefill(msg.data); break;
+  }
+};
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+const MD = (() => {
+  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  const KEYWORDS = {
+    kt:     /\b(fun|val|var|class|object|interface|enum|data|sealed|open|override|private|public|protected|internal|companion|suspend|coroutine|when|if|else|for|while|return|import|package|null|true|false|this|super|init|constructor|by|in|out|is|as|throw|try|catch|finally|abstract|lateinit|const|typealias|inline|reified|crossinline|noinline)\b/g,
+    java:   /\b(public|private|protected|class|interface|extends|implements|static|final|void|int|long|boolean|String|null|true|false|new|return|import|package|if|else|for|while|throw|try|catch|finally|abstract|synchronized)\b/g,
+    dart:   /\b(void|var|final|const|class|abstract|extends|implements|mixin|return|if|else|for|while|new|null|true|false|async|await|import|export|library|part|show|hide|this|super|factory|get|set|late|required|dynamic)\b/g,
+    js:     /\b(const|let|var|function|class|return|if|else|for|while|async|await|new|null|undefined|true|false|import|export|default|extends|this|super|typeof|instanceof|throw|try|catch|finally)\b/g,
+    ts:     /\b(const|let|var|function|class|interface|type|enum|return|if|else|for|while|async|await|new|null|undefined|true|false|import|export|default|extends|implements|this|super|typeof|instanceof|throw|try|catch|finally|public|private|protected|readonly|any|string|number|boolean)\b/g,
+    python: /\b(def|class|return|if|elif|else|for|while|import|from|as|with|try|except|finally|raise|pass|break|continue|None|True|False|and|or|not|in|is|lambda|yield|async|await|self)\b/g,
+    xml:    null, html: null, css: null, json: null, gradle: /\b(dependencies|implementation|testImplementation|androidTestImplementation|classpath|apply|plugin|buildscript|repositories|allprojects|android|defaultConfig|buildTypes|release|debug|minifyEnabled|proguardFiles)\b/g,
+  };
+
+  function highlight(code, lang) {
+    let s = esc(code);
+    const kw = KEYWORDS[lang] || KEYWORDS.kt;
+    if (!kw) return s;
+    // strings first
+    s = s.replace(/(&#34;|&quot;|')((?:[^\\]|\\.)*?)\1/g, (m) => `<span class="tok-str">${m}</span>`);
+    s = s.replace(/(`[^`]*`)/g, m => `<span class="tok-str">${m}</span>`);
+    // comments
+    s = s.replace(/(\/\/[^\n]*)/g, m => `<span class="tok-cm">${m}</span>`);
+    s = s.replace(/(\/\*[\s\S]*?\*\/)/g, m => `<span class="tok-cm">${m}</span>`);
+    s = s.replace(/(#[^\n]*)/g, m => `<span class="tok-cm">${m}</span>`);
+    // annotations
+    s = s.replace(/(@\w+)/g, m => `<span class="tok-ann">${m}</span>`);
+    // numbers
+    s = s.replace(/\b(\d+\.?\d*)\b/g, m => `<span class="tok-num">${m}</span>`);
+    // keywords (skip inside already-wrapped spans)
+    s = s.replace(kw, m => `<span class="tok-kw">${m}</span>`);
+    return s;
+  }
+
+  function renderInline(s) {
+    s = esc(s);
+    s = s.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
+    s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    s = s.replace(/_(.+?)_/g, '<em>$1</em>');
+    s = s.replace(/~~(.+?)~~/g, '<del>$1</del>');
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="#" onclick="return false">$1</a>');
+    return s;
+  }
+
+  // Returns {html, codeBlocks} — code blocks are extracted and replaced with placeholders
+  function render(md) {
+    const codeBlocks = [];
+    // Extract fenced code blocks
+    md = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push({ lang: lang || 'code', code: code.trimEnd() });
+      return `\x00CODE${idx}\x00`;
+    });
+
+    const lines = md.split('\n');
+    let html = ''; let inUl = false, inOl = false, inBq = false;
+
+    const closeAll = () => {
+      if (inUl)  { html += '</ul>';  inUl = false; }
+      if (inOl)  { html += '</ol>';  inOl = false; }
+      if (inBq)  { html += '</blockquote>'; inBq = false; }
+    };
+
+    for (const line of lines) {
+      if (/^\x00CODE(\d+)\x00$/.test(line)) {
+        closeAll();
+        const i = parseInt(line.match(/\x00CODE(\d+)\x00/)[1]);
+        const b = codeBlocks[i];
+        html += buildCodeBlock(b.lang, b.code);
+        continue;
+      }
+      if (line.startsWith('# '))   { closeAll(); html += `<h1>${renderInline(line.slice(2))}</h1>`; continue; }
+      if (line.startsWith('## '))  { closeAll(); html += `<h2>${renderInline(line.slice(3))}</h2>`; continue; }
+      if (line.startsWith('### ')) { closeAll(); html += `<h3>${renderInline(line.slice(4))}</h3>`; continue; }
+      if (/^---+$/.test(line))     { closeAll(); html += '<hr>'; continue; }
+      if (line.startsWith('> ')) {
+        if (inUl || inOl) closeAll();
+        if (!inBq) { html += '<blockquote>'; inBq = true; }
+        html += renderInline(line.slice(2)) + ' '; continue;
+      }
+      if (/^[-*] /.test(line)) {
+        if (inOl || inBq) closeAll();
+        if (!inUl) { html += '<ul>'; inUl = true; }
+        html += `<li>${renderInline(line.slice(2))}</li>`; continue;
+      }
+      if (/^\d+\. /.test(line)) {
+        if (inUl || inBq) closeAll();
+        if (!inOl) { html += '<ol>'; inOl = true; }
+        html += `<li>${renderInline(line.replace(/^\d+\. /, ''))}</li>`; continue;
+      }
+      if (line.trim() === '') { closeAll(); html += '<p></p>'; continue; }
+      closeAll();
+      html += `<p>${renderInline(line)}</p>`;
+    }
+    closeAll();
+    return html;
+  }
+
+  function buildCodeBlock(lang, code) {
+    const highlighted = highlight(code, lang.toLowerCase());
+    const idx = Math.random().toString(36).slice(2);
+    return `<div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">${esc(lang)}</span>
+        <button class="code-copy" id="copy-${idx}" onclick="App.copyCode(this, \`${code.replace(/`/g,'\\`').replace(/\\/g,'\\\\')}\`)">Copy</button>
+      </div>
+      <pre class="code-content"><code>${highlighted}</code></pre>
+    </div>`;
+  }
+
+  return { render, buildCodeBlock };
+})();
+
+// ─── File change parser ───────────────────────────────────────────────────────
+function parseFileChanges(text) {
+  const changes = [];
+  const fc = /<file_change\s+path="([^"]+)">([\s\S]*?)<\/file_change>/g;
+  const nf = /<new_file\s+path="([^"]+)">([\s\S]*?)<\/new_file>/g;
+  let m;
+  while ((m = fc.exec(text)) !== null) changes.push({ path: m[1].trim(), content: m[2].trim(), isNew: false });
+  while ((m = nf.exec(text)) !== null) changes.push({ path: m[1].trim(), content: m[2].trim(), isNew: true });
+  return changes;
+}
+
+// ─── App state & logic ────────────────────────────────────────────────────────
+const App = (() => {
+  let streaming = false;
+  let streamEl = null;         // current streaming text node
+  let streamRaw = '';          // raw text accumulated during streaming
+  let currentMsgBody = null;   // .msg-body div of current assistant message
+  let currentReasoningEl = null;
+  let allFileChanges = [];
+  let pendingImages = [];
+  let taggedFiles = [];
+  let fileList = [];
+  let filePicking = false;
+  let filePickQuery = '';
+  let diffPending = null;      // {path, content, isNew}
+  let applyAllPending = [];
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  const $msgs      = document.getElementById('messages');
+  const $welcome   = document.getElementById('welcome');
+  const $typing    = document.getElementById('typing');
+  const $input     = document.getElementById('input');
+  const $attachBar = document.getElementById('attach-bar');
+  const $status    = document.getElementById('status-label');
+  const $badge     = document.getElementById('intent-badge');
+  const $stopBtn   = document.getElementById('stop-btn');
+  const $sendBtn   = document.getElementById('send-btn');
+  const $term      = document.getElementById('terminal-output');
+  const $termDrawer= document.getElementById('terminal-drawer');
+  const $picker    = document.getElementById('file-picker');
+  const $diffOverlay    = document.getElementById('diff-overlay');
+  const $diffContent    = document.getElementById('diff-content');
+  const $diffTitle      = document.getElementById('diff-title');
+  const $diffApplyBtn   = document.getElementById('diff-apply-btn');
+  const $applyOverlay   = document.getElementById('apply-all-overlay');
+  const $applyList      = document.getElementById('apply-all-list');
+
+  // ── Input auto-grow ────────────────────────────────────────────────────────
+  $input.addEventListener('input', () => {
+    $input.style.height = 'auto';
+    $input.style.height = Math.min($input.scrollHeight, 180) + 'px';
+    handleAtMention();
+  });
+  $input.addEventListener('keydown', e => {
+    if (filePicking) {
+      handlePickerKey(e); return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  // ── @ mention ─────────────────────────────────────────────────────────────
+  function handleAtMention() {
+    const val = $input.value;
+    const cursor = $input.selectionStart;
+    const before = val.slice(0, cursor);
+    const atIdx = before.lastIndexOf('@');
+    if (atIdx >= 0 && !before.slice(atIdx+1).includes(' ')) {
+      filePickQuery = before.slice(atIdx+1).toLowerCase();
+      renderFilePicker();
+    } else {
+      closePicker();
+    }
+  }
+
+  function renderFilePicker() {
+    const filtered = fileList.filter(f => f.toLowerCase().includes(filePickQuery)).slice(0, 12);
+    if (filtered.length === 0) { closePicker(); return; }
+    $picker.innerHTML = filtered.map((f,i) =>
+      `<div class="file-item${i===0?' selected':''}" onmousedown="App.selectFile('${f.replace(/'/g,"&#39;")}',event)">${f}</div>`
+    ).join('');
+    $picker.classList.add('open');
+    filePicking = true;
+  }
+
+  function handlePickerKey(e) {
+    const items = $picker.querySelectorAll('.file-item');
+    let sel = [...items].findIndex(el => el.classList.contains('selected'));
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel+1)%items.length; items.forEach((el,i)=>el.classList.toggle('selected',i===sel)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel-1+items.length)%items.length; items.forEach((el,i)=>el.classList.toggle('selected',i===sel)); }
+    else if (e.key === 'Enter') { e.preventDefault(); const s = $picker.querySelector('.selected'); if(s) selectFile(s.textContent, e); }
+    else if (e.key === 'Escape') closePicker();
+  }
+
+  function selectFile(name, e) {
+    if (e) e.preventDefault();
+    const val = $input.value, cursor = $input.selectionStart;
+    const atIdx = val.slice(0, cursor).lastIndexOf('@');
+    $input.value = val.slice(0, atIdx) + val.slice(cursor);
+    addFilePill(name);
+    closePicker();
+    $input.focus();
+    sendToKotlin({ type: 'tag_file', name });
+  }
+
+  function closePicker() { $picker.classList.remove('open'); filePicking = false; }
+
+  // ── Attach pills ──────────────────────────────────────────────────────────
+  function addFilePill(name) {
+    if (taggedFiles.includes(name)) return;
+    taggedFiles.push(name);
+    const div = document.createElement('div');
+    div.className = 'pill';
+    div.dataset.file = name;
+    div.innerHTML = `📄 ${name} <button class="pill-remove" onclick="App.removeFile('${name.replace(/'/g,"&#39;")}')">×</button>`;
+    $attachBar.appendChild(div);
+    $attachBar.classList.add('has-items');
+  }
+
+  function removeFile(name) {
+    taggedFiles = taggedFiles.filter(f => f !== name);
+    const el = $attachBar.querySelector(`[data-file="${name}"]`);
+    if (el) el.remove();
+    if ($attachBar.children.length === 0) $attachBar.classList.remove('has-items');
+  }
+
+  function addImagePill(base64, name) {
+    pendingImages.push(base64);
+    const idx = pendingImages.length - 1;
+    const div = document.createElement('div');
+    div.className = 'pill img-pill';
+    div.dataset.imgIdx = idx;
+    const thumb = document.createElement('img');
+    thumb.className = 'img-thumb';
+    thumb.src = 'data:image/png;base64,' + base64;
+    div.appendChild(thumb);
+    div.innerHTML += ` ${name} <button class="pill-remove" onclick="App.removeImage(${idx})">×</button>`;
+    div.prepend(thumb);
+    $attachBar.appendChild(div);
+    $attachBar.classList.add('has-items');
+  }
+
+  function removeImage(idx) {
+    pendingImages[idx] = null;
+    const el = $attachBar.querySelector(`[data-img-idx="${idx}"]`);
+    if (el) el.remove();
+    if ($attachBar.children.length === 0) $attachBar.classList.remove('has-items');
+  }
+
+  // ── Hide welcome, show chat ────────────────────────────────────────────────
+  function showChat() { $welcome.style.display = 'none'; }
+
+  // ── Messages ───────────────────────────────────────────────────────────────
+  function addUserMessage(text, imgCount) {
+    showChat();
+    const row = document.createElement('div');
+    row.className = 'msg-row user';
+    const extra = imgCount > 0 ? `<br><span style="color:var(--accent-2);font-size:11px">📎 ${imgCount} image(s)</span>` : '';
+    row.innerHTML = `<div class="bubble md">${MD.render(text)}${extra}</div>`;
+    $msgs.appendChild(row);
+    scrollBottom();
+  }
+
+  function startAssistantMessage() {
+    showChat();
+    $typing.classList.remove('visible');
+
+    const row = document.createElement('div');
+    row.className = 'msg-row assistant streaming';
+    row.innerHTML = `
+      <div class="msg-meta">
+        <div class="ai-avatar">C</div>
+        <span class="ai-name">Coforge AI</span>
+      </div>
+      <div class="reasoning-block" style="display:none">
+        <button class="reasoning-toggle" onclick="App.toggleReasoning(this)">
+          <span class="chevron">▶</span> Thinking
+        </button>
+        <div class="reasoning-content"></div>
+      </div>
+      <div class="msg-body"></div>
+      <div class="msg-actions">
+        <button class="act-btn" onclick="App.copyLastResponse()">Copy</button>
+        <button class="act-btn" onclick="App.retry()">Retry</button>
+      </div>`;
+    $msgs.appendChild(row);
+
+    currentMsgBody = row.querySelector('.msg-body');
+    currentReasoningEl = row.querySelector('.reasoning-block');
+    streamEl = document.createTextNode('');
+    currentMsgBody.appendChild(streamEl);
+    streaming = true;
+    streamRaw = '';
+    scrollBottom();
+    return row;
+  }
+
+  function appendToken(token) {
+    streamRaw += token;
+    if (streamEl) { streamEl.textContent = streamRaw; scrollBottom(); }
+  }
+
+  function finalizeMessage(full) {
+    streaming = false;
+    const row = currentMsgBody?.closest('.msg-row');
+    if (row) row.classList.remove('streaming');
+
+    const changes = parseFileChanges(full);
+    allFileChanges = changes;
+
+    if (currentMsgBody) {
+      // Remove the streaming text node
+      currentMsgBody.innerHTML = '';
+      // Strip file_change / new_file blocks from visible text
+      const displayText = full
+        .replace(/<file_change[^>]*>[\s\S]*?<\/file_change>/g, '')
+        .replace(/<new_file[^>]*>[\s\S]*?<\/new_file>/g, '')
+        .trim();
+      currentMsgBody.classList.add('md');
+      currentMsgBody.innerHTML = MD.render(displayText);
+
+      // Append file change proposals
+      changes.forEach(ch => {
+        currentMsgBody.appendChild(buildChangeProposal(ch));
+      });
+
+      // Apply-all bar if multiple
+      if (changes.length >= 2) {
+        const bar = document.createElement('div');
+        bar.className = 'apply-all-bar';
+        bar.innerHTML = `
+          <span class="info">${changes.length} files to apply</span>
+          <button class="apply-all-btn" onclick="App.showApplyAll()">Apply All ${changes.length} Files</button>`;
+        currentMsgBody.appendChild(bar);
+      }
+    }
+    currentMsgBody = null;
+    currentReasoningEl = null;
+    streamEl = null;
+    scrollBottom();
+  }
+
+  function buildChangeProposal(ch) {
+    const id = 'fc-' + Math.random().toString(36).slice(2);
+    const div = document.createElement('div');
+    div.className = 'file-change';
+    div.id = id;
+    div.innerHTML = `
+      <div class="file-change-header">
+        <div class="file-change-left">
+          <span class="file-badge ${ch.isNew ? 'badge-new' : 'badge-edit'}">${ch.isNew ? 'NEW' : 'EDIT'}</span>
+          <span class="file-path">${ch.path}</span>
+        </div>
+        <div class="file-change-actions">
+          <button class="fc-btn fc-skip" onclick="document.getElementById('${id}').remove()">Skip</button>
+          <button class="fc-btn fc-diff" onclick="App.showDiff('${id}')">Diff</button>
+          <button class="fc-btn fc-apply" id="${id}-apply" onclick="App.applyFile('${id}')">Apply</button>
+        </div>
+      </div>`;
+    div._changeData = ch;
+    return div;
+  }
+
+  // ── Reasoning ──────────────────────────────────────────────────────────────
+  function updateReasoning(text) {
+    if (!currentReasoningEl) return;
+    currentReasoningEl.style.display = 'block';
+    const content = currentReasoningEl.querySelector('.reasoning-content');
+    if (content) content.textContent = text;
+  }
+
+  function toggleReasoning(btn) {
+    btn.classList.toggle('open');
+    const c = btn.nextElementSibling;
+    c.classList.toggle('visible');
+  }
+
+  // ── Typing indicator ───────────────────────────────────────────────────────
+  function showTyping() {
+    showChat();
+    $typing.classList.add('visible');
+    scrollBottom();
+  }
+  function hideTyping() { $typing.classList.remove('visible'); }
+
+  // ── Status / model chain ───────────────────────────────────────────────────
+  const MODEL_DOTS = { kimi: 'dot-kimi', gemini: 'dot-gemini', gpt: 'dot-gpt' };
+  function setModelActive(model) {
+    Object.values(MODEL_DOTS).forEach(id => document.getElementById(id)?.classList.remove('active'));
+    if (model && MODEL_DOTS[model]) document.getElementById(MODEL_DOTS[model])?.classList.add('active');
+  }
+
+  function setStatus(text) {
+    $status.textContent = text;
+    // Derive model from status text
+    if (/kimi/i.test(text))   setModelActive('kimi');
+    if (/gemini/i.test(text)) setModelActive('gemini');
+    if (/gpt|implement/i.test(text)) setModelActive('gpt');
+  }
+
+  function setIntent(intent) {
+    if (!intent) { $badge.style.display = 'none'; return; }
+    const map = {
+      EXPLAIN: { text: 'EXPLAIN', bg: 'rgba(74,144,217,0.15)', color: '#4a90d9' },
+      FIX:     { text: 'FIX',     bg: 'rgba(227,179,65,0.15)',  color: '#e3b341' },
+      EDIT:    { text: 'EDIT',    bg: 'rgba(74,144,217,0.12)',  color: '#4a90d9' },
+      BUILD:   { text: 'BUILD',   bg: 'rgba(188,140,255,0.15)', color: '#bc8cff' },
+    };
+    const m = map[intent] || { text: intent, bg: 'var(--bg-2)', color: 'var(--text-3)' };
+    $badge.textContent = m.text;
+    $badge.style.background = m.bg;
+    $badge.style.color = m.color;
+    $badge.style.display = 'inline-block';
+  }
+
+  // ── Send ───────────────────────────────────────────────────────────────────
+  function send() {
+    const text = $input.value.trim();
+    const imgs = pendingImages.filter(Boolean);
+    if (!text && imgs.length === 0) return;
+    if (streaming) return;
+
+    $input.value = '';
+    $input.style.height = 'auto';
+    $attachBar.innerHTML = '';
+    $attachBar.classList.remove('has-items');
+    const files = [...taggedFiles];
+    pendingImages = [];
+    taggedFiles = [];
+    closePicker();
+
+    addUserMessage(text, imgs.length);
+    showTyping();
+    setSending(true);
+
+    sendToKotlin({ type: 'send', text, images: imgs, tagged_files: files });
+  }
+
+  function setSending(on) {
+    $sendBtn.disabled = on;
+    $stopBtn.classList.toggle('visible', on);
+    if (!on) { setStatus(''); setIntent(null); setModelActive(null); }
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  function stop()         { sendToKotlin({ type: 'stop' }); setSending(false); hideTyping(); }
+  function openSettings() { sendToKotlin({ type: 'open_settings' }); }
+  function pickImage()    { sendToKotlin({ type: 'pick_image' }); }
+  function runTests()     { sendToKotlin({ type: 'run_tests' }); }
+  function runBuild()     { sendToKotlin({ type: 'run_build' }); }
+  function runLint()      { sendToKotlin({ type: 'run_lint' }); }
+
+  function prefill(text) {
+    $input.value = text;
+    $input.style.height = 'auto';
+    $input.style.height = Math.min($input.scrollHeight, 180) + 'px';
+    $input.focus();
+    $input.setSelectionRange(text.length, text.length);
+  }
+
+  function reset() {
+    sendToKotlin({ type: 'reset' });
+    clearMessages();
+  }
+
+  function clearMessages() {
+    $msgs.innerHTML = '';
+    $msgs.appendChild($welcome);
+    $welcome.style.display = '';
+    $typing.classList.remove('visible');
+    allFileChanges = [];
+    setSending(false);
+    setStatus('');
+    setIntent(null);
+    setModelActive(null);
+  }
+
+  function copyCode(btn, code) {
+    navigator.clipboard?.writeText(code).catch(() => sendToKotlin({ type: 'copy', text: code }));
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  }
+
+  function copyLastResponse() {
+    const text = streamRaw || currentMsgBody?.innerText || '';
+    navigator.clipboard?.writeText(text).catch(() => sendToKotlin({ type: 'copy', text }));
+  }
+
+  function retry() { sendToKotlin({ type: 'retry' }); }
+
+  // ── File apply ─────────────────────────────────────────────────────────────
+  function applyFile(id) {
+    const el = document.getElementById(id);
+    if (!el || !el._changeData) return;
+    const ch = el._changeData;
+    const applyBtn = document.getElementById(id + '-apply');
+    if (applyBtn) { applyBtn.textContent = 'Applying...'; applyBtn.classList.add('done'); applyBtn.disabled = true; }
+    sendToKotlin({ type: 'apply_file', path: ch.path, content: ch.content, is_new: ch.isNew });
+  }
+
+  function showDiff(id) {
+    const el = document.getElementById(id);
+    if (!el || !el._changeData) return;
+    diffPending = { id, ...el._changeData };
+    $diffTitle.textContent = (el._changeData.isNew ? '+ ' : '~ ') + el._changeData.path;
+    $diffContent.innerHTML = buildDiffHtml(el._changeData.content);
+    $diffApplyBtn.onclick = () => { closeDiff(); applyFile(id); };
+    $diffOverlay.classList.add('open');
+  }
+
+  function buildDiffHtml(content) {
+    return content.split('\n').map((line, i) => `
+      <div class="diff-line diff-add">
+        <span class="diff-line-num">${i+1}</span>
+        <span class="diff-line-text">${line.replace(/</g,'&lt;')}</span>
+      </div>`).join('');
+  }
+
+  function closeDiff()     { $diffOverlay.classList.remove('open'); diffPending = null; }
+
+  function showApplyAll() {
+    applyAllPending = [...allFileChanges];
+    $applyList.innerHTML = applyAllPending.map((ch, i) => `
+      <div class="apply-row">
+        <input type="checkbox" id="ac-${i}" checked>
+        <label class="apply-row-path" for="ac-${i}">${ch.isNew ? '+ ' : '~ '}${ch.path}</label>
+        <span class="file-badge ${ch.isNew ? 'badge-new' : 'badge-edit'}">${ch.isNew ? 'NEW' : 'EDIT'}</span>
+      </div>`).join('');
+    $applyOverlay.classList.add('open');
+  }
+
+  function closeApplyAll() { $applyOverlay.classList.remove('open'); }
+
+  function confirmApplyAll() {
+    const selected = applyAllPending.filter((_, i) => {
+      const cb = document.getElementById('ac-' + i);
+      return cb && cb.checked;
+    });
+    closeApplyAll();
+    sendToKotlin({ type: 'apply_all', files: selected });
+    selected.forEach(ch => {
+      addSystemLine(`Applying ${ch.path}...`);
+    });
+  }
+
+  // ── Terminal ───────────────────────────────────────────────────────────────
+  function openTerminal(label) {
+    $term.innerHTML = '';
+    if (label) appendTerminal(`$ ${label}\n`, 'term-info');
+    $termDrawer.classList.add('open');
+  }
+
+  function appendTerminal(line, cls) {
+    const span = document.createElement('span');
+    span.className = cls || detectTermClass(line);
+    span.textContent = line;
+    $term.appendChild(span);
+    $term.scrollTop = $term.scrollHeight;
+  }
+
+  function detectTermClass(line) {
+    const l = line.toLowerCase();
+    if (/error|exception|fail/.test(l)) return 'term-err';
+    if (/warn/.test(l)) return 'term-warn';
+    if (/success|passed|build successful|done/.test(l)) return 'term-ok';
+    return '';
+  }
+
+  function onTerminalDone(success, summary) {
+    appendTerminal('\n' + summary + '\n', success ? 'term-ok' : 'term-err');
+  }
+
+  function closeTerminal() { $termDrawer.classList.remove('open'); }
+
+  // ── Incoming Kotlin events ─────────────────────────────────────────────────
+  function onToken(tok) {
+    hideTyping();
+    if (!streaming || !currentMsgBody) {
+      startAssistantMessage();
+    }
+    appendToken(tok);
+  }
+
+  function onReasoning(text) { updateReasoning(text); }
+
+  function onComplete(full) {
+    hideTyping();
+    setSending(false);
+    setModelActive(null);
+    if (!currentMsgBody) startAssistantMessage();
+    finalizeMessage(full);
+  }
+
+  function onFileList(files) { fileList = files || []; }
+
+  function onApplySuccess(path) {
+    addSystemLine(`✓ Applied: ${path}`);
+    // Mark apply button as done
+    document.querySelectorAll('.fc-apply').forEach(btn => {
+      const fc = btn.closest('.file-change');
+      if (fc && fc._changeData?.path === path) {
+        btn.textContent = '✓ Applied';
+        btn.classList.add('done');
+        btn.disabled = true;
+        btn.style.color = 'var(--accent-green)';
+      }
+    });
+  }
+
+  function onApplyError(path, error) { addSystemLine(`✗ Failed: ${path} — ${error}`, true); }
+
+  // ── Utility ────────────────────────────────────────────────────────────────
+  function addSystemLine(text, isErr) {
+    const div = document.createElement('div');
+    div.style.cssText = `padding:2px 20px;font-size:11px;color:${isErr?'var(--accent-red)':'var(--text-3)'};font-style:italic;max-width:780px;margin:0 auto;`;
+    div.textContent = text;
+    $msgs.appendChild(div);
+    scrollBottom();
+  }
+
+  function scrollBottom() {
+    requestAnimationFrame(() => { $msgs.scrollTop = $msgs.scrollHeight; });
+  }
+
+  // Request file list on init
+  setTimeout(() => sendToKotlin({ type: 'get_file_list' }), 500);
+
+  return {
+    send, stop, reset, prefill, openSettings, pickImage,
+    runTests, runBuild, runLint,
+    onToken, onReasoning, onComplete, setStatus, setModelActive,
+    onFileList, onApplySuccess, onApplyError,
+    appendTerminal, onTerminalDone, openTerminal, closeTerminal,
+    applyFile, showDiff, closeDiff,
+    showApplyAll, closeApplyAll, confirmApplyAll,
+    clearMessages,
+    addImagePill, removeImage, removeFile,
+    toggleReasoning,
+    copyCode, copyLastResponse, retry,
+    addSystemLine,
+    setSending, showTyping: () => showTyping(), hideTyping: () => hideTyping(),
+    setIntent,
+  };
+})();
+</script>
+</body>
+</html>
