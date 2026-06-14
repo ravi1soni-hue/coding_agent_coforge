@@ -10,11 +10,12 @@ import javax.swing.JPanel
 class ChatToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val chatContent = ChatToolWindowContent(project)
-        // JCEF component is an AWT heavyweight — wrap in JPanel to support putClientProperty
-        // so QuickActionsGroup can retrieve the ChatToolWindowContent instance
-        val wrapper = JPanel(BorderLayout())
-        wrapper.add(chatContent.contentPanel, BorderLayout.CENTER)
-        wrapper.putClientProperty(ChatToolWindowContent.CLIENT_KEY, chatContent)
+        // Wrap in JPanel so putClientProperty works even when contentPanel is a
+        // JCEF heavyweight component (browser.component is AWT-backed on some JBR builds).
+        val wrapper = JPanel(BorderLayout()).apply {
+            add(chatContent.contentPanel, BorderLayout.CENTER)
+            putClientProperty(ChatToolWindowContent.CLIENT_KEY, chatContent)
+        }
         val content = ContentFactory.getInstance().createContent(wrapper, "", false)
         toolWindow.contentManager.addContent(content)
     }

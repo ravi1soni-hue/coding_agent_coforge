@@ -3,18 +3,20 @@ package com.coforge.codingagent
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
+import com.intellij.util.ui.JBUI
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
@@ -26,223 +28,94 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import javax.imageio.ImageIO
 import javax.swing.*
-import javax.swing.SwingUtilities
+import javax.swing.plaf.basic.BasicScrollBarUI
 
 class ChatToolWindowContent(private val project: Project) {
 
-    // ── Public panel exposed to ChatToolWindowFactory ──────────────────────────
     val contentPanel: JComponent
 
-    private val gson = Gson()
+    private val gson   = Gson()
+    private val history = mutableListOf<Message>()
     private val isFlutter get() =
         ProjectTypeDetector.detect(project).type == ProjectTypeDetector.ProjectType.FLUTTER
 
-    // ── JCEF ──────────────────────────────────────────────────────────────────
     private val browser: JBCefBrowser?
     private val jsQuery: JBCefJSQuery?
 
-    // ── Conversation history ───────────────────────────────────────────────────
-    private val history = mutableListOf<Message>()
-
     init {
-        // Ensure JCEF is enabled in the registry (disabled by default in some AS builds)
-        tryEnableJcef()
-
         if (JBCefApp.isSupported()) {
-            browser  = JBCefBrowser()
-            jsQuery  = JBCefJSQuery.create(browser)
+            browser      = JBCefBrowser()
+            jsQuery      = JBCefJSQuery.create(browser)
             contentPanel = browser.component
 
             setupBridge()
             loadUI()
 
-            // Background warm-up
             Thread { ProjectIndexer.warmUp(project); CodebaseGraph.build(project) }
                 .apply { isDaemon = true; name = "CoforgeWarmup" }.start()
         } else {
-            browser  = null
-            jsQuery  = null
-            contentPanel = buildJcefSetupPanel()
+            browser      = null
+            jsQuery      = null
+            contentPanel = buildSetupPanel()
         }
     }
 
-    /**
-     * Android Studio ships with the JetBrains Runtime but has JCEF disabled in its registry
-     * by default. Enabling it here and on first-time setup covers most installs automatically.
-     */
-    private fun tryEnableJcef() {
-        try {
-            val key = Registry.get("ide.browser.jcef.enabled")
-            if (!key.asBoolean()) key.setValue(true)
-        } catch (_: Exception) { /* registry key absent in very old builds — ignore */ }
-    }
-
-    /**
-     * Shown only when JCEF cannot be activated at runtime (e.g. non-JBR JDK).
-     * Provides a one-click fix and manual instructions.
-     */
-    private fun buildJcefSetupPanel(): JPanel {
-        val bg   = Color(13, 17, 23)
-        val card = Color(22, 27, 34)
-        val text = Color(230, 237, 243)
-        val mute = Color(125, 133, 144)
-        val accn = Color(193, 122, 94)
-
-        val panel = object : JPanel(GridBagLayout()) {
-            override fun paintComponent(g: Graphics) { g.color = bg; g.fillRect(0,0,width,height) }
-        }.apply { isOpaque = false }
-
-        val gbc = GridBagConstraints().apply {
-            gridx = 0; gridy = GridBagConstraints.RELATIVE
-            insets = Insets(6, 0, 6, 0); anchor = GridBagConstraints.CENTER
-            fill = GridBagConstraints.HORIZONTAL
-        }
-
-        // Logo
-        panel.add(object : JComponent() {
-            init { preferredSize = Dimension(56, 56) }
-            override fun paintComponent(g: Graphics) {
-                val g2 = g as Graphics2D
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                g2.paint = GradientPaint(0f,0f, accn, 56f,56f, Color(139,92,246))
-                g2.fillOval(0,0,56,56); g2.paint = null
-                g2.color = Color.WHITE; g2.font = Font("Inter", Font.BOLD, 26)
-                val fm = g2.fontMetrics; g2.drawString("C", 15, 28 + fm.ascent/2 - 1)
-            }
-        }, gbc)
-
-        panel.add(JLabel("Coforge AI — One-time Setup").apply {
-            foreground = text; font = Font("Inter", Font.BOLD, 16)
-            horizontalAlignment = SwingConstants.CENTER
-        }, gbc)
-
-        panel.add(JLabel("<html><center>Android Studio's built-in browser (JCEF)<br>needs to be enabled and the IDE restarted.</center></html>").apply {
-            foreground = mute; font = Font("Inter", Font.PLAIN, 12)
-            horizontalAlignment = SwingConstants.CENTER
-        }, gbc)
-
-        // Primary fix button
-        val fixBtn = object : JButton("Enable JCEF & Restart Android Studio") {
-            init {
-                font = Font("Inter", Font.BOLD, 13); foreground = Color.WHITE
-                isFocusPainted = false; isContentAreaFilled = false; isBorderPainted = false
-                border = BorderFactory.createEmptyBorder(10, 20, 10, 20)
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                addActionListener {
-                    try {
-                        Registry.get("ide.browser.jcef.enabled").setValue(true)
-                        val answer = Messages.showYesNoDialog(
-                            "JCEF has been enabled.\n\nRestart Android Studio now to apply?",
-                            "Restart Required", "Restart Now", "Later", null)
-                        if (answer == Messages.YES)
-                            ApplicationManager.getApplication().restart()
-                    } catch (e: Exception) {
-                        Messages.showErrorDialog(
-                            "Could not enable automatically:\n${e.message}\n\nPlease follow the manual steps below.",
-                            "Enable JCEF")
-                    }
-                }
-            }
-            override fun paintComponent(g: Graphics) {
-                val g2 = g as Graphics2D
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                g2.color = accn
-                g2.fill(RoundRectangle2D.Float(0f,0f,width.toFloat(),height.toFloat(),10f,10f))
-                super.paintComponent(g)
-            }
-        }
-        panel.add(fixBtn, gbc)
-
-        // Manual instructions
-        panel.add(JLabel("<html><center><b style='color:#e8e8e8'>Manual fix (if button above fails):</b><br><br>" +
-            "1. <b>Help → Find Action</b> → type <b>Registry</b> → open it<br>" +
-            "2. Search <code>ide.browser.jcef.enabled</code> → tick it ON<br>" +
-            "3. Restart Android Studio<br><br>" +
-            "<i>Or: Help → Edit Custom VM Options → add:</i><br>" +
-            "<code>-Dide.browser.jcef.enabled=true</code>" +
-            "</center></html>").apply {
-            foreground = mute; font = Font("Inter", Font.PLAIN, 11)
-            horizontalAlignment = SwingConstants.CENTER
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Color(48,54,61)),
-                BorderFactory.createEmptyBorder(12,16,12,16))
-            background = card; isOpaque = true
-        }, gbc)
-
-        return panel
-    }
-
-    // ── Bridge setup ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // JCEF bridge
+    // ─────────────────────────────────────────────────────────────────────────
     private fun setupBridge() {
-        val b = browser ?: return
         val q = jsQuery ?: return
-
         q.addHandler { raw ->
-            try {
-                val obj = gson.fromJson(raw, JsonObject::class.java)
-                handleJsMessage(obj)
-            } catch (e: Exception) {
-                pushError("Parse error: ${e.message}")
-            }
+            try { handleJs(gson.fromJson(raw, JsonObject::class.java)) }
+            catch (e: Exception) { pushRaw("""{"type":"status","data":"Bridge error: ${e.message}"}""") }
             null
         }
-
-        b.jbCefClient.addLoadHandler(object : CefLoadHandlerAdapter() {
-            override fun onLoadEnd(cefBrowser: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
-                if (!frame.isMain) return
-                // Inject the bridge function so JS can call Kotlin
-                val bridgeJs = """
-                    window.__kotlinBridge = function(msg) { ${q.inject("msg")} };
-                    window.injectBridge(window.__kotlinBridge);
-                """.trimIndent()
-                b.cefBrowser.executeJavaScript(bridgeJs, b.cefBrowser.url, 0)
-                // Send initial file list
-                SwingUtilities.invokeLater { pushFileList() }
+        browser?.jbCefClient?.addLoadHandler(object : CefLoadHandlerAdapter() {
+            override fun onLoadEnd(b: CefBrowser, f: CefFrame, code: Int) {
+                if (!f.isMain) return
+                js("""window.__bridge = function(m){ ${q.inject("m")} }; window._bridgeReady(window.__bridge);""")
+                SwingUtilities.invokeLater { sendFileList() }
             }
-        }, b.cefBrowser)
+        }, browser?.cefBrowser)
     }
 
     private fun loadUI() {
-        val html = ChatToolWindowContent::class.java
-            .getResource("/webview/index.html")
-            ?.readText()
-            ?: error("webview/index.html not found in resources")
+        val html = ChatToolWindowContent::class.java.getResource("/webview/index.html")?.readText()
+            ?: error("webview/index.html missing from resources")
         browser?.loadHTML(html)
     }
 
-    // ── JS → Kotlin message router ────────────────────────────────────────────
-    private fun handleJsMessage(msg: JsonObject) {
-        when (msg.get("type")?.asString) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // JS → Kotlin
+    // ─────────────────────────────────────────────────────────────────────────
+    private fun handleJs(msg: JsonObject) {
+        when (msg["type"]?.asString) {
             "send"          -> onSend(msg)
             "stop"          -> AiService.stop()
             "reset"         -> onReset()
             "retry"         -> onRetry()
-            "open_settings" -> openSettings()
+            "settings"      -> openSettings()
             "pick_image"    -> pickImage()
-            "tag_file"      -> { /* file already tagged client-side; context built from name at send time */ }
-            "get_file_list" -> pushFileList()
-            "copy"          -> copyToClipboard(msg.get("text")?.asString ?: "")
-            "apply_file"    -> onApplyFile(msg)
-            "apply_all"     -> onApplyAll(msg)
+            "file_list"     -> sendFileList()
+            "copy"          -> copy(msg["text"]?.asString ?: "")
+            "apply_file"    -> applyFile(msg)
+            "apply_all"     -> applyAll(msg)
             "run_tests"     -> runTests()
             "run_build"     -> runBuild()
             "run_lint"      -> runLint()
         }
     }
 
-    // ── Send ──────────────────────────────────────────────────────────────────
     private fun onSend(msg: JsonObject) {
-        val text        = msg.get("text")?.asString?.trim() ?: return
-        val images      = msg.getAsJsonArray("images")?.map { it.asString } ?: emptyList()
-        val taggedNames = msg.getAsJsonArray("tagged_files")?.map { it.asString } ?: emptyList()
+        val text   = msg["text"]?.asString?.trim() ?: return
+        val images = msg.getAsJsonArray("images")?.map { it.asString } ?: emptyList()
+        val tagged = msg.getAsJsonArray("tagged")?.map { it.asString } ?: emptyList()
 
         if (history.size >= 100) history.subList(0, 40).clear()
         history.add(Message("user", text))
 
-        val taggedVfs = EditorContext.getAllProjectFiles(project)
-            .filter { it.name in taggedNames }
-
-        val context = EditorContext.getSmartContext(project, taggedVfs)
+        val taggedVfs = EditorContext.getAllProjectFiles(project).filter { it.name in tagged }
+        val context   = EditorContext.getSmartContext(project, taggedVfs)
 
         AiService.callAgentChain(
             userMessage = text,
@@ -250,9 +123,9 @@ class ChatToolWindowContent(private val project: Project) {
             context     = context,
             images      = images,
             project     = project,
-            onStatus    = { s   -> push("status",  s)        },
-            onReasoning = { r   -> push("reasoning", r)      },
-            onToken     = { tok -> push("token",   tok)      },
+            onStatus    = { s   -> push("status",    s)   },
+            onReasoning = { r   -> push("reasoning", r)   },
+            onToken     = { tok -> push("token",     tok) },
             onComplete  = { full ->
                 history.add(Message("assistant", full))
                 push("complete", full)
@@ -260,73 +133,63 @@ class ChatToolWindowContent(private val project: Project) {
         )
     }
 
-    // ── Retry (resend last user message) ──────────────────────────────────────
     private fun onRetry() {
         val last = history.lastOrNull { it.role == "user" } ?: return
         history.removeLastOrNull(); history.removeLastOrNull()
-        val fakeMsg = JsonObject().apply {
-            addProperty("type", "send")
-            addProperty("text", last.content)
-            add("images", JsonArray())
-            add("tagged_files", JsonArray())
-        }
-        onSend(fakeMsg)
+        onSend(JsonObject().apply {
+            addProperty("type", "send"); addProperty("text", last.content)
+            add("images", JsonArray()); add("tagged", JsonArray())
+        })
     }
 
-    // ── Reset ─────────────────────────────────────────────────────────────────
     private fun onReset() {
         AiService.stop(); history.clear()
         ProjectIndexer.invalidate(project)
         ProjectDependencyAnalyzer.invalidate(project)
         ProjectTypeDetector.invalidate(project)
         CodebaseGraph.invalidate(project)
-        pushRaw("""{"type":"session_reset"}""")
+        pushRaw("""{"type":"reset"}""")
         Thread { ProjectIndexer.warmUp(project); CodebaseGraph.build(project) }
             .apply { isDaemon = true }.start()
     }
 
-    // ── Apply single file ──────────────────────────────────────────────────────
-    private fun onApplyFile(msg: JsonObject) {
-        val path    = msg.get("path")?.asString    ?: return
-        val content = msg.get("content")?.asString ?: return
-        val isNew   = msg.get("is_new")?.asBoolean ?: false
+    private fun applyFile(msg: JsonObject) {
+        val path    = msg["path"]?.asString    ?: return
+        val content = msg["content"]?.asString ?: return
+        val isNew   = msg["is_new"]?.asBoolean ?: false
         WriteCommandAction.runWriteCommandAction(project) {
             try {
-                applyFile(path, content, isNew)
-                pushRaw("""{"type":"apply_success","path":${gson.toJson(path)}}""")
+                writeFile(path, content, isNew)
+                pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
             } catch (e: Exception) {
-                pushRaw("""{"type":"apply_error","path":${gson.toJson(path)},"error":${gson.toJson(e.message)}}""")
+                pushRaw("""{"type":"apply_err","path":${gson.toJson(path)},"msg":${gson.toJson(e.message)}}""")
             }
         }
     }
 
-    // ── Apply all files ────────────────────────────────────────────────────────
-    private fun onApplyAll(msg: JsonObject) {
+    private fun applyAll(msg: JsonObject) {
         val files = msg.getAsJsonArray("files") ?: return
+        val applied = mutableListOf<String>()
         WriteCommandAction.runWriteCommandAction(project) {
-            val applied = mutableListOf<String>()
             files.forEach { el ->
-                val obj = el.asJsonObject
-                val path    = obj.get("path")?.asString    ?: return@forEach
-                val content = obj.get("content")?.asString ?: return@forEach
-                val isNew   = obj.get("isNew")?.asBoolean  ?: false
+                val o = el.asJsonObject
+                val path    = o["path"]?.asString    ?: return@forEach
+                val content = o["content"]?.asString ?: return@forEach
+                val isNew   = o["isNew"]?.asBoolean  ?: false
                 try {
-                    applyFile(path, content, isNew)
+                    writeFile(path, content, isNew)
                     applied.add(path)
-                    pushRaw("""{"type":"apply_success","path":${gson.toJson(path)}}""")
+                    pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
                 } catch (e: Exception) {
-                    pushRaw("""{"type":"apply_error","path":${gson.toJson(path)},"error":${gson.toJson(e.message)}}""")
+                    pushRaw("""{"type":"apply_err","path":${gson.toJson(path)},"msg":${gson.toJson(e.message)}}""")
                 }
             }
-            // Trigger agentic test loop after applying
-            if (applied.isNotEmpty()) SwingUtilities.invokeLater { startAgenticTestLoop(applied, 1) }
         }
+        if (applied.isNotEmpty()) SwingUtilities.invokeLater { startTestLoop(applied, 1) }
     }
 
-    // ── File write logic ──────────────────────────────────────────────────────
-    private fun applyFile(path: String, content: String, isNew: Boolean) {
-        val base = project.basePath
-            ?: throw IllegalStateException("Project base path is null")
+    private fun writeFile(path: String, content: String, isNew: Boolean) {
+        val base = project.basePath ?: throw IllegalStateException("No project base path")
         val file = File("$base/$path")
         if (isNew) {
             file.parentFile?.mkdirs()
@@ -334,235 +197,310 @@ class ChatToolWindowContent(private val project: Project) {
             LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
         } else {
             val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
-            if (vf != null) {
-                FileDocumentManager.getInstance().getDocument(vf)?.setText(content)
-            } else {
-                FileUtil.writeToFile(file, content)
-                LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
-            }
+            if (vf != null) FileDocumentManager.getInstance().getDocument(vf)?.setText(content)
+            else { FileUtil.writeToFile(file, content); LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) }
         }
     }
 
-    // ── Terminal commands ─────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // Terminal commands
+    // ─────────────────────────────────────────────────────────────────────────
     private fun runTests() {
-        jsEval("""App.openTerminal("Running tests...")""")
-        startAgenticTestLoop(emptyList(), 1)
+        js("""App.openTerminal("Running tests...")""")
+        startTestLoop(emptyList(), 1)
     }
 
     private fun runBuild() {
-        jsEval("""App.openTerminal("Building...")""")
-        val onOutput: (String) -> Unit = { line -> termLine(line) }
-        val onDone: (TerminalExecutor.CommandResult) -> Unit = { result ->
-            SwingUtilities.invokeLater {
-                pushRaw("""{"type":"terminal_done","success":${result.isSuccess},"summary":${gson.toJson(result.summary)}}""")
-                if (!result.isSuccess) autoFix(result.output, "Build failed")
-            }
-        }
-        if (isFlutter) TerminalExecutor.flutterBuild(project, onOutput, onDone)
-        else           TerminalExecutor.buildDebug(project, onOutput, onDone)
+        js("""App.openTerminal("Building...")""")
+        val exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit =
+            if (isFlutter) TerminalExecutor::flutterBuild else TerminalExecutor::buildDebug
+        runCmd(exec) { ok, out -> if (!ok) autoFix(out, "build") }
     }
 
     private fun runLint() {
-        jsEval("""App.openTerminal("Analyzing...")""")
-        val onOutput: (String) -> Unit = { line -> termLine(line) }
-        val onDone: (TerminalExecutor.CommandResult) -> Unit = { result ->
-            SwingUtilities.invokeLater {
-                pushRaw("""{"type":"terminal_done","success":${result.isSuccess},"summary":${gson.toJson(result.summary)}}""")
-                if (!result.isSuccess) autoFix(result.output, "Lint errors")
-            }
-        }
-        if (isFlutter) TerminalExecutor.flutterAnalyze(project, onOutput, onDone)
-        else           TerminalExecutor.runLint(project, onOutput, onDone)
+        js("""App.openTerminal("Linting...")""")
+        val exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit =
+            if (isFlutter) TerminalExecutor::flutterAnalyze else TerminalExecutor::runLint
+        runCmd(exec) { ok, out -> if (!ok) autoFix(out, "lint") }
     }
 
-    // ── Agentic test loop ──────────────────────────────────────────────────────
-    private fun startAgenticTestLoop(changedFiles: List<String>, attempt: Int) {
-        if (attempt > 3) {
-            jsEval("""App.addSystemLine("⚠️ Auto-fix gave up after 3 attempts — manual review needed.", true)""")
-            return
-        }
-        jsEval("""App.openTerminal("Test run $attempt/3")""")
-        jsEval("""App.addSystemLine("🤖 Attempt $attempt/3 — running tests...")""")
-
-        val onOutput: (String) -> Unit = { line -> termLine(line) }
-        val onDone: (TerminalExecutor.CommandResult) -> Unit = { result ->
-            SwingUtilities.invokeLater {
-                pushRaw("""{"type":"terminal_done","success":${result.isSuccess},"summary":${gson.toJson(result.summary)}}""")
-                if (result.isSuccess) {
-                    jsEval("""App.addSystemLine("✅ All tests pass! (attempt $attempt)")""")
-                } else {
-                    jsEval("""App.addSystemLine("❌ Tests failed — AI is fixing... ($attempt/3)")""")
-                    jsEval("""App.showTyping()""")
-                    AiService.fixTestFailures(
-                        failureOutput = result.output.takeLast(4000),
-                        changedFiles  = changedFiles,
-                        project       = project,
-                        onStatus  = { s   -> push("status", s) },
-                        onToken   = { tok -> push("token",  tok) },
-                        onComplete = { full ->
-                            history.add(Message("assistant", full))
-                            push("complete", full)
-                            // Parse and auto-apply fixes
-                            val fixes = parseFileChanges(full)
-                            if (fixes.isEmpty()) {
-                                jsEval("""App.addSystemLine("⚠️ No fixes returned. Stopping.", true)""")
-                                return@fixTestFailures
-                            }
-                            WriteCommandAction.runWriteCommandAction(project) {
-                                fixes.forEach { (path, content, isNew) ->
-                                    try { applyFile(path, content, isNew) } catch (_: Exception) {}
-                                }
-                            }
-                            val newFiles = (changedFiles + fixes.map { it.path }).distinct()
-                            startAgenticTestLoop(newFiles, attempt + 1)
-                        }
-                    )
-                }
-            }
-        }
-        if (isFlutter) TerminalExecutor.flutterTest(project, onOutput, onDone)
-        else           TerminalExecutor.runTests(project, onOutput, onDone)
-    }
-
-    // ── Auto-fix on build/lint failure ────────────────────────────────────────
-    private fun autoFix(output: String, label: String) {
-        val errors = output.lines()
-            .filter { it.contains("error", true) || it.contains("FAILED") }
-            .take(30).joinToString("\n")
-        if (errors.isBlank()) return
-
-        val prompt = "Fix these $label errors:\n```\n$errors\n```"
-        history.add(Message("user", prompt))
-
-        val userJson = gson.toJson(mapOf("type" to "show_system", "text" to "Auto-fixing $label..."))
-        jsEval("""App.addSystemLine("🔧 Auto-fixing $label...")""")
-        jsEval("""App.showTyping()""")
-
-        val ctx = try { EditorContext.getSmartContext(project, emptyList()) } catch (_: Exception) { "" }
-        AiService.callAgentChain(
-            userMessage = prompt,
-            history     = history.dropLast(1),
-            context     = ctx,
-            project     = project,
-            onStatus    = { s   -> push("status", s) },
-            onReasoning = { r   -> push("reasoning", r) },
-            onToken     = { tok -> push("token", tok) },
-            onComplete  = { full ->
-                history.add(Message("assistant", full))
-                push("complete", full)
-            }
+    private fun runCmd(
+        exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit,
+        onDone: (Boolean, String) -> Unit
+    ) {
+        exec(
+            { line -> termLine(line) },
+            { r    -> SwingUtilities.invokeLater {
+                pushRaw("""{"type":"term_done","ok":${r.isSuccess},"summary":${gson.toJson(r.summary)}}""")
+                onDone(r.isSuccess, r.output)
+            }}
         )
     }
 
-    // ── Settings & image picker ────────────────────────────────────────────────
-    private fun openSettings() {
-        ApplicationManager.getApplication().invokeLater {
-            ShowSettingsUtil.getInstance()
-                .showSettingsDialog(project, AppSettingsConfigurable::class.java)
-        }
-    }
-
-    private fun pickImage() {
-        ApplicationManager.getApplication().invokeLater {
-            val fc = javax.swing.JFileChooser().apply {
-                dialogTitle = "Attach Image"
-                fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
-                    "Images", "png", "jpg", "jpeg", "gif", "webp", "bmp")
-                isMultiSelectionEnabled = true
-            }
-            if (fc.showOpenDialog(contentPanel) == javax.swing.JFileChooser.APPROVE_OPTION) {
-                fc.selectedFiles.forEach { f ->
-                    try {
-                        val img = ImageIO.read(f) ?: return@forEach
-                        val resized = resizeImage(img, 1024)
-                        val b64 = encodeBase64(resized)
-                        val nameJson = gson.toJson(f.name)
-                        SwingUtilities.invokeLater {
-                            jsEval("App.addImagePill(${gson.toJson(b64)}, $nameJson)")
+    private fun startTestLoop(changed: List<String>, attempt: Int) {
+        if (attempt > 3) { js("""App.sysLine("⚠️ Gave up after 3 attempts")"""); return }
+        js("""App.openTerminal("Test run $attempt/3"); App.sysLine("🤖 Attempt $attempt/3 — running tests...")""")
+        val exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit =
+            if (isFlutter) TerminalExecutor::flutterTest else TerminalExecutor::runTests
+        exec(
+            { line -> termLine(line) },
+            { r    -> SwingUtilities.invokeLater {
+                pushRaw("""{"type":"term_done","ok":${r.isSuccess},"summary":${gson.toJson(r.summary)}}""")
+                if (r.isSuccess) {
+                    js("""App.sysLine("✅ All tests pass! (attempt $attempt)")""")
+                } else {
+                    js("""App.sysLine("❌ Tests failed — AI fixing...")""")
+                    js("""App.startStream()""")
+                    AiService.fixTestFailures(
+                        failureOutput = r.output.takeLast(4000),
+                        changedFiles  = changed, project = project,
+                        onStatus  = { s   -> push("status", s) },
+                        onToken   = { tok -> push("token", tok) },
+                        onComplete = { full ->
+                            history.add(Message("assistant", full))
+                            push("complete", full)
+                            val fixes = parseChanges(full)
+                            if (fixes.isEmpty()) { js("""App.sysLine("⚠️ No fix returned.")"""); return@fixTestFailures }
+                            WriteCommandAction.runWriteCommandAction(project) {
+                                fixes.forEach { (p, c, n) -> try { writeFile(p, c, n) } catch (_: Exception) {} }
+                            }
+                            startTestLoop((changed + fixes.map { it.first }).distinct(), attempt + 1)
                         }
-                    } catch (_: Exception) {}
+                    )
                 }
+            }}
+        )
+    }
+
+    private fun autoFix(output: String, label: String) {
+        val errs = output.lines().filter { it.contains("error", true) || it.contains("FAILED") }.take(25).joinToString("\n")
+        if (errs.isBlank()) return
+        val prompt = "Fix these $label errors:\n```\n$errs\n```"
+        history.add(Message("user", prompt))
+        js("""App.sysLine("🔧 Auto-fixing $label errors..."); App.startStream()""")
+        val ctx = try { EditorContext.getSmartContext(project, emptyList()) } catch (_: Exception) { "" }
+        AiService.callAgentChain(
+            userMessage = prompt, history = history.dropLast(1), context = ctx, project = project,
+            onStatus    = { s   -> push("status", s) },
+            onReasoning = { _   -> },
+            onToken     = { tok -> push("token", tok) },
+            onComplete  = { full -> history.add(Message("assistant", full)); push("complete", full) }
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Utilities
+    // ─────────────────────────────────────────────────────────────────────────
+    private fun openSettings() = ApplicationManager.getApplication().invokeLater {
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, AppSettingsConfigurable::class.java)
+    }
+
+    private fun pickImage() = ApplicationManager.getApplication().invokeLater {
+        val fc = javax.swing.JFileChooser().apply {
+            dialogTitle = "Attach Image"
+            fileFilter  = javax.swing.filechooser.FileNameExtensionFilter("Images","png","jpg","jpeg","gif","webp","bmp")
+            isMultiSelectionEnabled = true
+        }
+        if (fc.showOpenDialog(contentPanel) == javax.swing.JFileChooser.APPROVE_OPTION) {
+            fc.selectedFiles.forEach { f ->
+                try {
+                    val img  = ImageIO.read(f) ?: return@forEach
+                    val b64  = encodeB64(resizeImg(img, 1024))
+                    val name = gson.toJson(f.name)
+                    SwingUtilities.invokeLater { js("App.addImage(${gson.toJson(b64)}, $name)") }
+                } catch (_: Exception) {}
             }
         }
     }
 
-    // ── File list ──────────────────────────────────────────────────────────────
-    private fun pushFileList() {
+    private fun sendFileList() {
         val names = EditorContext.getAllProjectFiles(project).map { it.name }
-        val json  = gson.toJson(names)
-        pushRaw("""{"type":"file_list","data":$json}""")
+        pushRaw("""{"type":"file_list","data":${gson.toJson(names)}}""")
     }
 
-    // ── Kotlin → JS helpers ───────────────────────────────────────────────────
-    private fun push(type: String, data: String) {
-        val json = """{"type":${gson.toJson(type)},"data":${gson.toJson(data)}}"""
-        pushRaw(json)
-    }
+    private fun copy(text: String) =
+        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+
+    // Kotlin→JS helpers
+    private fun push(type: String, data: String) =
+        pushRaw("""{"type":${gson.toJson(type)},"data":${gson.toJson(data)}}""")
 
     private fun pushRaw(json: String) {
         val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
-        jsEval("window.onKotlinMessage('$escaped')")
+        js("window.onK('$escaped')")
     }
-
-    private fun pushError(msg: String) = push("status", "Error: $msg")
 
     private fun termLine(line: String) {
         val cls = when {
-            line.contains("error", true) || line.contains("FAILED") -> "term-err"
-            line.contains("warn", true)  -> "term-warn"
-            line.contains("success", true) || line.startsWith("BUILD SUCCESSFUL") -> "term-ok"
+            line.contains("error", true) || line.contains("FAILED") -> "err"
+            line.contains("warn",  true)  -> "warn"
+            line.contains("success", true)-> "ok"
             else -> ""
         }
-        val escaped = line.replace("\\", "\\\\").replace("'", "\\'")
-        jsEval("App.appendTerminal('$escaped', '$cls')")
+        val escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+        js("App.termLine('$escaped','$cls')")
     }
 
-    private fun jsEval(script: String) {
-        browser?.cefBrowser?.executeJavaScript(script, "", 0)
-    }
+    private fun js(script: String) = browser?.cefBrowser?.executeJavaScript(script, "", 0)
 
-    private fun copyToClipboard(text: String) {
-        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
-    }
-
-    // ── Parse file changes from AI response ───────────────────────────────────
-    private data class FileChange(val path: String, val content: String, val isNew: Boolean)
-
-    private fun parseFileChanges(response: String): List<FileChange> {
-        val list = mutableListOf<FileChange>()
-        val fc = Regex("""<file_change\s+path="([^"]+)">([\s\S]*?)</file_change>""")
-        val nf = Regex("""<new_file\s+path="([^"]+)">([\s\S]*?)</new_file>""")
-        fc.findAll(response).forEach { list.add(FileChange(it.groupValues[1].trim(), it.groupValues[2].trim(), false)) }
-        nf.findAll(response).forEach { list.add(FileChange(it.groupValues[1].trim(), it.groupValues[2].trim(), true)) }
+    // File change parsing
+    private data class FC(val first: String, val second: String, val third: Boolean)
+    private fun parseChanges(r: String): List<FC> {
+        val list = mutableListOf<FC>()
+        Regex("""<file_change\s+path="([^"]+)">([\s\S]*?)</file_change>""").findAll(r)
+            .forEach { list.add(FC(it.groupValues[1].trim(), it.groupValues[2].trim(), false)) }
+        Regex("""<new_file\s+path="([^"]+)">([\s\S]*?)</new_file>""").findAll(r)
+            .forEach { list.add(FC(it.groupValues[1].trim(), it.groupValues[2].trim(), true)) }
         return list
     }
 
-    // ── Image utilities ───────────────────────────────────────────────────────
-    private fun resizeImage(src: BufferedImage, max: Int): BufferedImage {
+    // Image utilities
+    private fun resizeImg(src: BufferedImage, max: Int): BufferedImage {
         if (src.width <= max && src.height <= max) return src
-        val scale = max.toDouble() / maxOf(src.width, src.height)
-        val nw = (src.width * scale).toInt(); val nh = (src.height * scale).toInt()
+        val s = max.toDouble() / maxOf(src.width, src.height)
+        val nw = (src.width * s).toInt(); val nh = (src.height * s).toInt()
         val out = BufferedImage(nw, nh, BufferedImage.TYPE_INT_RGB)
         out.createGraphics().also { g ->
-            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
-                java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
             g.drawImage(src, 0, 0, nw, nh, null); g.dispose()
         }
         return out
     }
-
-    private fun encodeBase64(img: BufferedImage): String {
+    private fun encodeB64(img: BufferedImage): String {
         val b = ByteArrayOutputStream(); ImageIO.write(img, "PNG", b)
         return java.util.Base64.getEncoder().encodeToString(b.toByteArray())
     }
 
-    // ── Public API for QuickActionsGroup ──────────────────────────────────────
+    // Public API for QuickActionsGroup
     fun prefillAndSend(prompt: String) {
-        val escaped = prompt.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
-        jsEval("App.prefill('$escaped')")
+        val esc = prompt.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+        js("App.prefill('$esc')")
     }
 
-    companion object {
-        const val CLIENT_KEY = "CoforgeAiChatContent"
+    // ─────────────────────────────────────────────────────────────────────────
+    // Setup panel (shown when JCEF unavailable)
+    // ─────────────────────────────────────────────────────────────────────────
+    private fun buildSetupPanel(): JPanel {
+        val BG    = Color(13, 17, 23)
+        val CARD  = Color(22, 27, 34)
+        val BORD  = Color(48, 54, 61)
+        val TEXT  = Color(230, 237, 243)
+        val MUTE  = Color(125, 133, 144)
+        val ACCN  = Color(193, 122, 94)
+        val GREEN = Color(63, 185, 80)
+
+        val root = object : JPanel(GridBagLayout()) {
+            override fun paintComponent(g: Graphics) { g.color = BG; g.fillRect(0, 0, width, height) }
+        }.apply { isOpaque = false }
+
+        val gbc = GridBagConstraints().apply {
+            gridx = 0; gridy = GridBagConstraints.RELATIVE
+            fill = GridBagConstraints.HORIZONTAL
+            anchor = GridBagConstraints.CENTER
+            insets = Insets(8, 32, 8, 32)
+        }
+
+        // ── Logo ──
+        root.add(object : JComponent() {
+            init { preferredSize = Dimension(64, 64) }
+            override fun paintComponent(g: Graphics) {
+                val g2 = g as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.paint = GradientPaint(0f, 0f, ACCN, 64f, 64f, Color(139, 92, 246))
+                g2.fillOval(0, 0, 64, 64)
+                g2.paint = null; g2.color = Color.WHITE
+                g2.font = Font("Inter", Font.BOLD, 30)
+                val fm = g2.fontMetrics
+                g2.drawString("C", (64 - fm.stringWidth("C")) / 2, 32 + fm.ascent / 2 - 2)
+            }
+        }, gbc)
+
+        root.add(JLabel("Coforge AI — Browser Setup").apply {
+            foreground = TEXT; font = Font("Inter", Font.BOLD, 18)
+            horizontalAlignment = SwingConstants.CENTER
+        }, gbc)
+
+        root.add(JLabel("<html><center>Android Studio ships without the embedded browser (JCEF).<br>A one-time runtime switch is needed — takes 30 seconds.</center></html>").apply {
+            foreground = MUTE; font = Font("Inter", Font.PLAIN, 12)
+            horizontalAlignment = SwingConstants.CENTER
+        }, gbc)
+
+        // ── Steps card ──
+        val steps = object : JPanel(GridLayout(3, 1, 0, 0)) {
+            override fun paintComponent(g: Graphics) {
+                val g2 = g as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = CARD
+                g2.fill(RoundRectangle2D.Float(0f, 0f, width.toFloat(), height.toFloat(), 10f, 10f))
+                g2.color = BORD
+                g2.draw(RoundRectangle2D.Float(0.5f, 0.5f, width - 1f, height - 1f, 10f, 10f))
+            }
+        }.apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(14, 18)
+        }
+        listOf(
+            "1.  Press  Ctrl+Shift+A  (⌘⇧A on Mac)",
+            "2.  Type:  Choose Boot Runtime for the IDE",
+            "3.  Select any entry that says  \"with JCEF\"  → OK → Restart"
+        ).forEachIndexed { i, text ->
+            val lbl = JLabel("<html>$text</html>").apply {
+                foreground = TEXT; font = Font("Inter", Font.PLAIN, 12)
+                border = if (i < 2) BorderFactory.createMatteBorder(0, 0, 1, 0, BORD) else BorderFactory.createEmptyBorder()
+                border = BorderFactory.createCompoundBorder(border, JBUI.Borders.empty(8, 0))
+            }
+            steps.add(lbl)
+        }
+        root.add(steps, gbc)
+
+        // ── Open dialog button ──
+        val btn = object : JButton("Open Boot Runtime Selector Now") {
+            init {
+                isContentAreaFilled = false; isBorderPainted = false; isFocusPainted = false
+                foreground = Color.WHITE; font = Font("Inter", Font.BOLD, 13)
+                border = JBUI.Borders.empty(11, 20); cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                addActionListener { tryOpenRuntimeDialog() }
+            }
+            override fun paintComponent(g: Graphics) {
+                val g2 = g as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = ACCN
+                g2.fill(RoundRectangle2D.Float(0f, 0f, width.toFloat(), height.toFloat(), 8f, 8f))
+                super.paintComponent(g)
+            }
+        }
+        root.add(btn, gbc)
+
+        root.add(JLabel("<html><center><span style='color:#606062'>After restarting, reinstall/re-enable the plugin.<br>JCEF is available on all JBR \"with JCEF\" runtimes — free download inside Android Studio.</span></center></html>").apply {
+            foreground = MUTE; font = Font("Inter", Font.PLAIN, 11)
+            horizontalAlignment = SwingConstants.CENTER
+        }, gbc)
+
+        return root
     }
+
+    /** Tries several known action IDs for the Boot Runtime chooser dialog. */
+    private fun tryOpenRuntimeDialog() {
+        val ids = listOf(
+            "ChooseBootRuntime",          // older IJ
+            "choose.ide.runtime.v2",      // IJ 2022+
+            "SwitchBootJdk"               // some builds
+        )
+        val mgr = ActionManager.getInstance()
+        for (id in ids) {
+            val action = mgr.getAction(id) ?: continue
+            val event  = AnActionEvent.createFromDataContext("", null, DataContext.EMPTY_CONTEXT)
+            ApplicationManager.getApplication().invokeLater { action.actionPerformed(event) }
+            return
+        }
+        // None found — show manual instructions in a dialog
+        javax.swing.JOptionPane.showMessageDialog(
+            contentPanel,
+            "Press Ctrl+Shift+A (⌘⇧A) → type \"Choose Boot Runtime\" → pick one with \"JCEF\" → restart.",
+            "Open Manually",
+            javax.swing.JOptionPane.INFORMATION_MESSAGE
+        )
+    }
+
+    companion object { const val CLIENT_KEY = "CoforgeAiChatContent" }
 }
