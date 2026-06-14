@@ -15,13 +15,6 @@ import java.util.concurrent.CompletableFuture
 
 data class Message(val role: String, val content: String)
 
-enum class Intent {
-    EXPLAIN,      // question / explanation  → single GPT call  (~5s)
-    FIX,          // bug / error / crash     → Kimi → GPT       (~15s)
-    CODE_SIMPLE,  // small targeted edit     → Kimi → GPT       (~15s)
-    CODE_COMPLEX  // new feature / architect → Kimi → Gemini → GPT (~40s)
-}
-
 object AiService {
     private val LOG = Logger.getInstance(AiService::class.java)
     private const val API_URL = "https://quasarmarket.coforge.com/qag/llmrouter-api/v2/chat/completions"
@@ -41,47 +34,64 @@ object AiService {
             }) }
     }
 
-    // ─── Open-ended system prompts (no hardcoded library lists) ──────────────
+    // ─── System prompts ───────────────────────────────────────────────────────
 
     /**
-     * Kimi reasons about the problem using the ACTUAL project context.
-     * No hardcoded frameworks — it reads what's in the project and adapts.
+     * Kimi is the brain. It reads the full conversation, understands what was
+     * previously delivered vs what is still needed, and produces a structured
+     * analysis + action plan. No regex — Kimi decides everything.
      */
-    private fun kimiSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
+    private fun kimiAnalysisSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
         val platform = when (info.type) {
             ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter / Dart"
             ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android / ${info.mainLanguage}"
             ProjectTypeDetector.ProjectType.UNKNOWN -> "Mobile"
         }
         append("""
-            You are an expert $platform developer and architect.
-            You work across ALL libraries, tools, and patterns in the $platform ecosystem —
-            not just a fixed set. New libraries, SDKs, and patterns appear every week and you
-            know them. When web search results or documentation are provided in the context,
-            use them as authoritative source of truth.
+            You are an expert $platform senior developer and AI coding agent.
 
-            YOUR TASK: Given the developer's request, produce a STRUCTURED IMPLEMENTATION PLAN.
-            No code — only a precise numbered plan. Cover:
-            1. Which files change and why
-            2. Exact implementation approach using the project's actual dependencies (listed below)
-            3. Edge cases, async/threading concerns, memory management, lifecycle issues
-            4. Any new packages/versions needed with exact coordinates
+            You receive the FULL conversation history so you can see:
+            - What the user asked for in previous turns
+            - What was already delivered (files created, explanations given, etc.)
+            - What the user complained about or said was wrong
+            - What is STILL missing or needs fixing
 
-            IMPORTANT RULES:
-            - Use ONLY the libraries already in this project unless a new one is clearly needed
-            - If web search results are in context, use that documentation — it overrides your training
-            - Never suggest an alternative library just because you prefer it
-            - Match the existing code style and architecture patterns in this project
+            YOUR JOB: Produce a structured analysis of the current situation and a precise action plan.
+
+            ── ANALYSIS FORMAT (always follow this structure) ──────────────────
+            ACTION: [one of: EXPLAIN_ONLY | CREATE_FILES | MODIFY_FILES | FIX_BUG | MIXED]
+
+            WHAT WAS ALREADY DELIVERED:
+            (Summarize what previous assistant turns actually gave the user — files, explanations, etc.)
+
+            WHAT IS STILL NEEDED:
+            (Based on conversation history and current request, what is missing or wrong)
+
+            PLAN:
+            1. (specific step — which file, what change, why)
+            2. ...
+            ────────────────────────────────────────────────────────────────────
+
+            CRITICAL RULES FOR ACTION:
+            - If the user is asking a pure conceptual question with no code task → ACTION: EXPLAIN_ONLY
+            - If the user asks to create something, add a feature, or write code → ACTION: CREATE_FILES or MODIFY_FILES
+            - If the previous assistant turn gave explanations but NO files, and user wanted files → mark WHAT IS STILL NEEDED accordingly and action CREATE_FILES
+            - If the user says "you didn't create it", "where is the page", "what did you do" → they want files, not more explanations
+            - If the request is a mix (e.g., explain AND create) → ACTION: MIXED
+            - Always use the project's actual dependencies — listed below
+            - Never suggest alternatives for no reason; match existing project patterns
+            - If web search docs are in context, treat them as authoritative
         """.trimIndent())
 
         if (!deps.isEmpty()) {
-            append("\n\nTHIS PROJECT'S ACTUAL DEPENDENCIES:\n")
+            append("\n\nPROJECT DEPENDENCIES (use these; only add new ones if clearly necessary):\n")
             append(deps.toPromptContext())
         }
     }
 
     /**
-     * Gemini reviews the plan against the actual project constraints.
+     * Gemini is the quality gate. It reads Kimi's analysis and the full context,
+     * checks correctness and compatibility, and returns a validated action plan.
      */
     private fun geminiReviewSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
         val platform = when (info.type) {
@@ -91,131 +101,81 @@ object AiService {
         }
         append("""
             You are a rigorous $platform code reviewer and quality gate.
-            Review the implementation plan and return an IMPROVED & VALIDATED version.
 
-            Check for:
-            - Correctness: will this plan actually solve the stated problem?
-            - Compatibility: do the suggested APIs/methods exist in the versions this project uses?
-            - Missing edge cases, threading/async bugs, memory leaks, lifecycle issues
-            - Anti-patterns or fragile approaches specific to $platform
-            - Version conflicts with existing dependencies
-            - If web search docs are in context, verify the plan matches the actual API
+            You receive Kimi's analysis of the situation and a proposed action plan.
+            Your job: validate and improve the plan before implementation.
 
-            Return only the improved plan. No code.
+            Check:
+            - Does the plan actually address what the user needs (including undelivered prior requests)?
+            - Do all APIs and methods exist in the versions this project uses?
+            - Are there threading/async bugs, lifecycle issues, memory leaks?
+            - Are there missing files, missing route registrations, missing imports?
+            - Does the plan match the project's actual dependency versions?
+            - If web search docs are in context, does the plan use the documented API?
+
+            Return: the improved and validated plan only. No code.
         """.trimIndent())
 
         if (!deps.isEmpty()) {
-            append("\n\nProject dependencies for version compatibility checks:\n")
+            append("\n\nProject dependencies:\n")
             append(deps.toPromptContext())
         }
     }
 
     /**
-     * GPT implements. Open-ended — can generate Kotlin, Dart, XML, YAML, anything.
+     * GPT-5 is the executor. It receives the validated plan and implements it.
+     * Unified prompt — handles both explanations and file creation based on the plan's ACTION field.
      */
-    private fun gptImplementSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
+    private fun gptExecuteSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
         val platform = when (info.type) {
             ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter/Dart"
             ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android/Kotlin"
             ProjectTypeDetector.ProjectType.UNKNOWN -> "Mobile"
         }
         append("""
-            You are an elite $platform developer implementing code changes directly into the user's project.
+            You are an elite $platform developer executing a validated implementation plan.
 
-            ══════════════════════════════════════════════════════
-            OUTPUT FORMAT — THIS IS MANDATORY, NO EXCEPTIONS:
-            ══════════════════════════════════════════════════════
+            The plan tells you what ACTION to take. Follow the ACTION exactly:
 
-            Every single file you create or modify MUST be wrapped in one of these tags:
+            ── IF ACTION is EXPLAIN_ONLY ────────────────────────────────────────
+            Write a clear, direct explanation with markdown formatting.
+            Use code examples where helpful. Be concrete, never vague.
+            ────────────────────────────────────────────────────────────────────
 
-            NEW FILE:
-            <new_file path="lib/screens/some_screen.dart">
-            // COMPLETE FILE CONTENTS HERE — not a snippet, the whole file
-            </new_file>
+            ── IF ACTION is CREATE_FILES, MODIFY_FILES, FIX_BUG, or MIXED ──────
+            You MUST output every file using these XML tags:
 
-            MODIFIED FILE:
-            <file_change path="lib/main.dart">
-            // COMPLETE FILE CONTENTS HERE — not a snippet, the whole file
-            </file_change>
+            NEW FILE → <new_file path="relative/path/to/File.ext">COMPLETE FILE CONTENTS</new_file>
+            MODIFIED FILE → <file_change path="relative/path/to/File.ext">COMPLETE FILE CONTENTS</file_change>
 
-            ══════════════════════════════════════════════════════
-            ABSOLUTE PROHIBITIONS — VIOLATING ANY OF THESE IS WRONG:
-            ══════════════════════════════════════════════════════
-            ❌ NEVER write markdown code blocks (``` dart or ``` kotlin)
-            ❌ NEVER write "Step 1:", "Step 2:" tutorials or how-to guides
-            ❌ NEVER write "Here's what you need to do" or "You can now..."
-            ❌ NEVER write "// ... rest of file" or "// existing code here" or "// TODO"
-            ❌ NEVER truncate files — output the COMPLETE file every time
-            ❌ NEVER write placeholder code — everything must be real, working code
-            ❌ NEVER explain what the user should do manually — YOU do it in the file tags
-            ══════════════════════════════════════════════════════
+            ABSOLUTE RULES for file output:
+            ❌ NEVER write markdown code blocks (```dart, ```kotlin, etc.)
+            ❌ NEVER write Step 1/Step 2 tutorial instructions
+            ❌ NEVER truncate — output the COMPLETE file every time, no "// rest of file"
+            ❌ NEVER write placeholder or TODO code — everything must be real and working
+            ❌ NEVER tell the user what to do manually — you do it in the file tags
 
-            OUTPUT STRUCTURE (follow exactly):
-            1. One <new_file> block for each new file
-            2. One <file_change> block for each modified file
-            3. After ALL file blocks: 2-3 sentences max explaining what changed
+            After all file tags: 1-2 sentences max describing what was created/changed.
 
-            File extension rules: .kt = Kotlin, .dart = Dart, .xml = XML, .yaml = YAML/pubspec
+            For MIXED action: write the explanation first, then all file tags.
+            ────────────────────────────────────────────────────────────────────
 
-            If the request adds a new dependency, also output the modified pubspec.yaml or build.gradle.
-            Use ONLY libraries already in the project unless a new one is clearly required.
-            If web search docs are in context, use the documented API — not training memory.
+            File extension rules: .kt=Kotlin  .dart=Dart  .xml=XML  .yaml=YAML/pubspec
+            If adding a new package: also output the updated pubspec.yaml or build.gradle.
+            Use only existing project libraries unless the plan explicitly adds a new one.
+            If web docs are in context, use the documented API — not training memory.
         """.trimIndent())
 
         if (!deps.isEmpty()) {
-            append("\n\nProject dependencies (use ONLY these unless adding new ones):\n")
+            append("\n\nProject dependencies:\n")
             append(deps.toPromptContext())
         }
-    }
-
-    /**
-     * GPT explains — answers questions authoritatively using current web docs when available.
-     */
-    private fun gptExplainSystem(info: ProjectTypeDetector.ProjectInfo) = buildString {
-        val platform = when (info.type) {
-            ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter/Dart"
-            ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android/Kotlin"
-            ProjectTypeDetector.ProjectType.UNKNOWN -> "Mobile"
-        }
-        append("""
-            You are an expert $platform developer and technical mentor.
-            You are knowledgeable about the ENTIRE ecosystem — every library, framework, and tool,
-            including ones released after your training cutoff if their documentation is in the context.
-
-            Answer clearly, confidently, and directly with concrete examples.
-            Use markdown: headers, bold, code blocks. Never hedge. Never say "I'm not sure."
-            If web search results are provided, use them as authoritative current documentation.
-        """.trimIndent())
     }
 
     private val gptInlineSystem = """
         Complete the code. OUTPUT ONLY the completion text — no explanation, no markdown.
         1-5 lines max. Match existing code style exactly.
     """.trimIndent()
-
-    // ─── Intent detection ─────────────────────────────────────────────────────
-
-    fun detectIntent(message: String): Intent {
-        val lower = message.lowercase().trim()
-        val tokens = lower.split(Regex("[\\s,?.!]+")).toSet()
-        val actionWords = setOf("create","implement","build","generate","write","add","make","new","develop","integrate","set up","setup")
-        val fixWords = setOf("fix","debug","error","bug","crash","exception","issue","problem","broken","fails","failing","wrong","incorrect","not working","doesn't work","solve")
-        val simpleWords = setOf("rename","format","remove","delete","move","extract","inline","convert","change","update","modify","sort")
-        val explainWords = setOf("what","why","how","explain","describe","understand","clarify","difference","meaning","tell me")
-
-        // Action words always override explain — "create" is never an explanation
-        val isAction = tokens.any { it in actionWords } || actionWords.any { lower.contains(it) }
-        val isFix = tokens.any { it in fixWords }
-        val isSimple = tokens.any { it in simpleWords }
-        val isExplain = (lower.endsWith("?") || explainWords.any { lower.contains(it) }) && !isAction
-
-        return when {
-            isExplain -> Intent.EXPLAIN
-            isFix     -> Intent.FIX
-            isSimple && !isAction -> Intent.CODE_SIMPLE
-            else      -> Intent.CODE_COMPLEX
-        }
-    }
 
     // ─── Main entry point ─────────────────────────────────────────────────────
 
@@ -238,7 +198,6 @@ object AiService {
         val deps = project?.let { ProjectDependencyAnalyzer.analyze(it) }
             ?: ProjectDependencyAnalyzer.ProjectDeps(emptyList(), null, null, null, null, null, null, null)
 
-        // Run URL fetch, web search, and codebase index search in parallel
         onStatus("Gathering context...")
         val urlFuture    = CompletableFuture.supplyAsync { UrlContentFetcher.fetchAll(userMessage) }
         val searchFuture = CompletableFuture.supplyAsync { WebSearchService.fetchContextIfNeeded(userMessage, info.type) }
@@ -266,63 +225,51 @@ object AiService {
                 searchContext.takeIf { it.isNotBlank() }
             ).joinToString("\n\n===\n\n")
 
-            val intent = detectIntent(userMessage)
+            // ── Step 1: Kimi analyzes the full situation (always runs) ────────
+            onStatus("Analyzing your request...")
+            callModelBlocking(
+                settings.kimiModel, settings.kimiApiKey,
+                kimiAnalysisSystem(info, deps),
+                buildKimiPrompt(userMessage, enrichedContext, history)
+            ).thenCompose { kimiAnalysis ->
+                if (stopRequested) return@thenCompose CompletableFuture.completedFuture(kimiAnalysis to "")
+                onReasoning(kimiAnalysis)
 
-            when (intent) {
-                // ── Fast: single GPT call ─────────────────────────────────────
-                Intent.EXPLAIN -> {
-                    onStatus("Answering...")
-                    callModelStreaming(settings.gptModel, settings.gptApiKey,
-                        gptExplainSystem(info),
-                        buildDirectPrompt(userMessage, enrichedContext, history), images, onToken)
-                        .thenAccept { onComplete(it) }
-                        .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
+                // Pure explain → skip Gemini review for speed
+                val isExplainOnly = kimiAnalysis.contains("ACTION: EXPLAIN_ONLY", ignoreCase = true)
+                if (isExplainOnly) {
+                    return@thenCompose CompletableFuture.completedFuture(kimiAnalysis to "")
                 }
 
-                // ── Medium: Kimi plan → GPT ───────────────────────────────────
-                Intent.FIX, Intent.CODE_SIMPLE -> {
-                    onStatus("Analyzing...")
-                    callModelBlocking(settings.kimiModel, settings.kimiApiKey,
-                        kimiSystem(info, deps),
-                        buildReasoningPrompt(userMessage, enrichedContext, history))
-                        .thenCompose { plan ->
-                            if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
-                            onReasoning("PLAN:\n$plan")
-                            onStatus("Implementing...")
-                            callModelStreaming(settings.gptModel, settings.gptApiKey,
-                                gptImplementSystem(info, deps),
-                                buildImplPrompt(userMessage, plan, enrichedContext, history), images, onToken)
-                        }
-                        .thenAccept { onComplete(it) }
-                        .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
+                // ── Step 2: Gemini validates the plan ────────────────────────
+                onStatus("Validating plan...")
+                callModelBlocking(
+                    settings.geminiModel, settings.geminiApiKey,
+                    geminiReviewSystem(info, deps),
+                    "Conversation summary and request:\n${buildKimiPrompt(userMessage, enrichedContext, history).take(2000)}\n\nKimi's analysis:\n$kimiAnalysis\n\nValidate and improve this plan."
+                ).thenApply { review -> kimiAnalysis to review }
+
+            }.thenCompose { (kimiAnalysis, geminiReview) ->
+                if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
+
+                val validatedPlan = if (geminiReview.isNotBlank()) {
+                    onReasoning("VALIDATED:\n$geminiReview")
+                    geminiReview
+                } else {
+                    kimiAnalysis
                 }
 
-                // ── Full chain: Kimi → Gemini → GPT ──────────────────────────
-                Intent.CODE_COMPLEX -> {
-                    onStatus("Thinking...")
-                    callModelBlocking(settings.kimiModel, settings.kimiApiKey,
-                        kimiSystem(info, deps),
-                        buildReasoningPrompt(userMessage, enrichedContext, history))
-                        .thenCompose { kimiPlan ->
-                            if (stopRequested) return@thenCompose CompletableFuture.completedFuture(kimiPlan to "")
-                            onStatus("Reviewing plan...")
-                            callModelBlocking(settings.geminiModel, settings.geminiApiKey,
-                                geminiReviewSystem(info, deps),
-                                "Request: $userMessage\n\nPlan:\n$kimiPlan\n\nContext:\n$enrichedContext")
-                                .thenApply { review -> kimiPlan to review }
-                        }
-                        .thenCompose { (kimiPlan, review) ->
-                            if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
-                            onReasoning("INITIAL PLAN:\n$kimiPlan\n\nVALIDATED PLAN:\n$review")
-                            onStatus("Implementing...")
-                            callModelStreaming(settings.gptModel, settings.gptApiKey,
-                                gptImplementSystem(info, deps),
-                                buildImplPrompt(userMessage, review.ifBlank { kimiPlan }, enrichedContext, history), images, onToken)
-                        }
-                        .thenAccept { onComplete(it) }
-                        .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
-                }
+                // ── Step 3: GPT executes ──────────────────────────────────────
+                onStatus("Working...")
+                callModelStreaming(
+                    settings.gptModel, settings.gptApiKey,
+                    gptExecuteSystem(info, deps),
+                    buildExecutePrompt(userMessage, validatedPlan, enrichedContext, history),
+                    images, onToken
+                )
             }
+            .thenAccept { onComplete(it) }
+            .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
         }
     }
 
@@ -351,9 +298,12 @@ object AiService {
 
         onStatus("Analyzing failures...")
         callModelBlocking(settings.kimiModel, settings.kimiApiKey,
-            kimiSystem(info, deps),
+            kimiAnalysisSystem(info, deps),
             """
-            The following test failures occurred after applying changes to: $fileList
+            ACTION: FIX_BUG
+
+            WHAT IS STILL NEEDED:
+            Fix all failing tests after changes were applied to: $fileList
 
             TEST OUTPUT:
             $failureOutput
@@ -361,21 +311,23 @@ object AiService {
             CODEBASE CONTEXT:
             $indexContext
 
-            Produce a precise plan to fix ALL failing tests.
+            PLAN:
+            Produce a precise numbered plan to fix ALL failing tests.
             """.trimIndent()
         ).thenCompose { plan ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
             onStatus("Fixing...")
             callModelStreaming(settings.gptModel, settings.gptApiKey,
-                gptImplementSystem(info, deps),
+                gptExecuteSystem(info, deps),
                 """
-                Validated fix plan:
+                ═══ VALIDATED PLAN ═══
                 $plan
 
-                Files that were changed and now have test failures: $fileList
+                ═══ CURRENT REQUEST ═══
+                Fix failing tests in: $fileList
                 Test output: ${failureOutput.take(3000)}
 
-                Implement the fix. Output ONLY the corrected file(s) using <file_change> tags.
+                Execute the plan. Output corrected files using <file_change> tags with COMPLETE file contents.
                 """.trimIndent(),
                 emptyList(), onToken)
         }
@@ -400,35 +352,40 @@ object AiService {
 
     // ─── Prompt builders ──────────────────────────────────────────────────────
 
+    /** Full conversation history for Kimi — more turns, longer content, so it sees what was/wasn't delivered. */
     private fun historyBlock(history: List<Message>) =
-        history.takeLast(6).joinToString("\n") { "[${it.role.uppercase()}]: ${it.content.take(800)}" }
+        history.takeLast(10).joinToString("\n\n") { msg ->
+            val label = if (msg.role == "user") "USER" else "ASSISTANT (previously delivered)"
+            "[$label]:\n${msg.content.take(1200)}"
+        }
 
-    private fun buildDirectPrompt(msg: String, ctx: String, history: List<Message>) = buildString {
-        historyBlock(history).takeIf { it.isNotEmpty() }?.let { append("Conversation:\n$it\n\n") }
-        ctx.takeIf { it.isNotBlank() }?.let { append("Context:\n$it\n\n") }
-        append("Question: $msg")
+    /** Kimi receives the full context: history, codebase, web docs, current request. */
+    private fun buildKimiPrompt(msg: String, ctx: String, history: List<Message>) = buildString {
+        val h = historyBlock(history)
+        if (h.isNotEmpty()) {
+            append("═══ CONVERSATION HISTORY ═══\n")
+            append(h)
+            append("\n\n")
+        }
+        ctx.takeIf { it.isNotBlank() }?.let {
+            append("═══ PROJECT CODE & WEB CONTEXT ═══\n$it\n\n")
+        }
+        append("═══ CURRENT REQUEST ═══\n$msg\n\n")
+        append("Analyze the full situation above. Identify what was already delivered vs. what is still needed. Produce your structured analysis and action plan.")
     }
 
-    private fun buildReasoningPrompt(msg: String, ctx: String, history: List<Message>) = buildString {
-        historyBlock(history).takeIf { it.isNotEmpty() }?.let { append("Conversation:\n$it\n\n") }
-        ctx.takeIf { it.isNotBlank() }?.let { append("Code and web context:\n$it\n\n") }
-        append("Request: $msg\n\nProduce a structured implementation plan.")
-    }
-
-    private fun buildImplPrompt(msg: String, plan: String, ctx: String, history: List<Message>) = buildString {
-        historyBlock(history).takeIf { it.isNotEmpty() }?.let { append("Conversation:\n$it\n\n") }
-        ctx.takeIf { it.isNotBlank() }?.let { append("Code and web context:\n$it\n\n") }
-        append("""
-            Validated plan:
-            $plan
-
-            Original request: $msg
-
-            NOW IMPLEMENT THIS COMPLETELY.
-            Output ONLY <new_file> and <file_change> tagged blocks with full file contents.
-            Do NOT write any markdown code blocks, tutorials, or step-by-step instructions.
-            Every file that needs to exist or change must appear inside a tag. Start now.
-        """.trimIndent())
+    /** GPT receives the validated plan + full context and executes. */
+    private fun buildExecutePrompt(msg: String, plan: String, ctx: String, history: List<Message>) = buildString {
+        val h = historyBlock(history)
+        if (h.isNotEmpty()) {
+            append("═══ CONVERSATION HISTORY ═══\n$h\n\n")
+        }
+        ctx.takeIf { it.isNotBlank() }?.let {
+            append("═══ PROJECT CODE & WEB CONTEXT ═══\n$it\n\n")
+        }
+        append("═══ VALIDATED PLAN ═══\n$plan\n\n")
+        append("═══ CURRENT REQUEST ═══\n$msg\n\n")
+        append("Execute the plan above completely. Follow the ACTION field — if it requires files, output EVERY file inside <new_file> or <file_change> tags with COMPLETE contents. Start immediately.")
     }
 
     // ─── Model callers ────────────────────────────────────────────────────────
