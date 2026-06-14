@@ -388,9 +388,7 @@ object AiService {
 
     private fun callModelBlocking(model: String, apiKey: String, system: String, user: String): CompletableFuture<String> {
         if (apiKey.isBlank()) return CompletableFuture.failedFuture(Exception("API key missing for $model"))
-        // Kimi K2 Thinking burns tokens on internal reasoning before producing content.
-        // A low max_tokens cap results in content:null. Always give thinking models ≥4000.
-        val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = false, maxTokens = 4000))
+        val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = false))
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
             .thenApply { r ->
                 if (r.statusCode() == 200) parseBlocking(r.body())
@@ -403,7 +401,7 @@ object AiService {
         images: List<String> = emptyList(), onToken: (String) -> Unit
     ): CompletableFuture<String> {
         if (apiKey.isBlank()) return CompletableFuture.failedFuture(Exception("API key missing for $model"))
-        val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = true, images = images, maxTokens = 8000), timeoutSec = 180)
+        val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = true, images = images), timeoutSec = 180)
         return CompletableFuture.supplyAsync {
             val response = client.send(request, HttpResponse.BodyHandlers.ofLines())
             val full = StringBuilder()
