@@ -160,6 +160,11 @@ object AiService {
             - Does the plan account for the project's actual code patterns (not generic patterns)?
             - If web search results are in context, does the plan match the current documented API?
 
+            IMPORTANT: For every file edit in the plan, note the EXACT existing code block that will
+            be replaced (by quoting a key line or two from the fetched file content). GPT will need
+            this to produce a correct <search> block. If you cannot identify the exact existing code,
+            flag it in the plan so GPT knows to locate it carefully.
+
             Output: the validated and improved plan only — no code, no markdown code blocks.
             Keep the same structure as Kimi's plan (ACTION, WHAT IS STILL NEEDED, PLAN steps).
         """.trimIndent())
@@ -191,26 +196,37 @@ object AiService {
             ────────────────────────────────────────────────────────────────────
 
             ── IF ACTION is CREATE_FILES, MODIFY_FILES, FIX_BUG, or MIXED ──────
-            Output EVERY file using these XML tags — no other format is acceptable:
 
-            <new_file path="relative/path/to/File.ext">
-            COMPLETE FILE CONTENTS HERE — every line, no truncation
+            NEW FILE — use this when the file does not yet exist:
+            <new_file path="relative/path/to/NewFile.ext">
+            COMPLETE FILE CONTENTS — every line of the new file
             </new_file>
 
+            EXISTING FILE EDIT — use this for every change to an existing file:
             <file_change path="relative/path/to/ExistingFile.ext">
-            COMPLETE FILE CONTENTS HERE — every line, no truncation
+            <search>
+            EXACT VERBATIM COPY of the existing code block you are replacing.
+            Must match the file character-for-character. Copy it from the context — do not paraphrase.
+            Include enough surrounding lines (the full function, class, or block) so it is unambiguous.
+            </search>
+            <replace>
+            THE NEW CODE that replaces the search block above.
+            Only this section changes — everything else in the file is untouched.
+            </replace>
             </file_change>
+
+            One <file_change> block per distinct edit location. If you need to change two separate
+            sections of the same file, use two <file_change> blocks with the same path.
 
             ABSOLUTE RULES:
             ❌ NEVER write markdown code blocks (``` dart, ``` kotlin, etc.)
             ❌ NEVER write Step-by-step tutorial instructions
             ❌ NEVER write "// ... rest of file", "// existing code", "// TODO"
-            ❌ NEVER truncate — COMPLETE file every time, including unchanged code
-            ❌ NEVER write placeholder code — everything must be real and working
+            ❌ NEVER put the entire file in <search> or <replace> — only the changed block
+            ❌ NEVER make up code for the <search> block — copy it exactly from the provided file context
             ❌ NEVER tell the user what to do — you do it inside the file tags
 
             After all file tags: 1-2 sentences max describing what was created/changed.
-
             For MIXED: write explanation first, then all file tags.
             ────────────────────────────────────────────────────────────────────
 

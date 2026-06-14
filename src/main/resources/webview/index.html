@@ -851,10 +851,24 @@ window.copyCode = (btn, code) => {
 function parseFC(text){
   const out = [];
   let m;
+  // Existing file edits — search/replace format
   const re1 = /<file_change\s+path="([^"]+)">([\s\S]*?)<\/file_change>/g;
+  while((m=re1.exec(text))!==null){
+    const path = m[1].trim();
+    const body = m[2];
+    const sm = /<search>([\s\S]*?)<\/search>/.exec(body);
+    const rm = /<replace>([\s\S]*?)<\/replace>/.exec(body);
+    if(sm && rm){
+      // Surgical search-replace — safe, cannot wipe unrelated code
+      out.push({path, search:sm[1].trim(), content:rm[1].trim(), isNew:false, isDiff:true});
+    } else {
+      // Fallback: legacy full-file format (treated as full overwrite — warn in UI)
+      out.push({path, search:null, content:body.trim(), isNew:false, isDiff:false});
+    }
+  }
+  // New files — complete content
   const re2 = /<new_file\s+path="([^"]+)">([\s\S]*?)<\/new_file>/g;
-  while((m=re1.exec(text))!==null) out.push({path:m[1].trim(),content:m[2].trim(),isNew:false});
-  while((m=re2.exec(text))!==null) out.push({path:m[1].trim(),content:m[2].trim(),isNew:true});
+  while((m=re2.exec(text))!==null) out.push({path:m[1].trim(),search:null,content:m[2].trim(),isNew:true,isDiff:false});
   return out;
 }
 
@@ -1244,7 +1258,7 @@ const A = (() => {
     const el=document.getElementById(id); if(!el||!el._fc)return;
     const btn=document.getElementById(id+'-ab');
     if(btn){btn.textContent='Applying…';btn.classList.add('done');}
-    b2k({type:'apply_file', path:el._fc.path, content:el._fc.content, is_new:el._fc.isNew});
+    b2k({type:'apply_file', path:el._fc.path, content:el._fc.content, is_new:el._fc.isNew, search:el._fc.search||null});
   }
   function onApplied(path){
     sysLine(`✓ Applied: ${path}`);
@@ -1269,7 +1283,8 @@ const A = (() => {
   }
   function closeApply(){ $aov.classList.remove('open'); }
   function confirmApply(){
-    const sel=applyPending.filter((_,i)=>document.getElementById('ac'+i)?.checked);
+    const sel=applyPending.filter((_,i)=>document.getElementById('ac'+i)?.checked)
+      .map(fc=>({path:fc.path, content:fc.content, isNew:fc.isNew, search:fc.search||null}));
     closeApply();
     b2k({type:'apply_all', files:sel});
   }

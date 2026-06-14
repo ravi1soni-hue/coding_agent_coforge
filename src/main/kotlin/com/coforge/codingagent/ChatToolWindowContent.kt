@@ -172,9 +172,10 @@ class ChatToolWindowContent(private val project: Project) {
         val path    = msg["path"]?.asString    ?: return
         val content = msg["content"]?.asString ?: return
         val isNew   = msg["is_new"]?.asBoolean ?: false
+        val search  = msg["search"]?.asString?.takeIf { it.isNotBlank() }
         WriteCommandAction.runWriteCommandAction(project) {
             try {
-                writeFile(path, content, isNew)
+                writeFile(path, content, isNew, search)
                 pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
             } catch (e: Exception) {
                 pushRaw("""{"type":"apply_err","path":${gson.toJson(path)},"msg":${gson.toJson(e.message)}}""")
@@ -187,12 +188,13 @@ class ChatToolWindowContent(private val project: Project) {
         val applied = mutableListOf<String>()
         WriteCommandAction.runWriteCommandAction(project) {
             files.forEach { el ->
-                val o = el.asJsonObject
+                val o       = el.asJsonObject
                 val path    = o["path"]?.asString    ?: return@forEach
                 val content = o["content"]?.asString ?: return@forEach
                 val isNew   = o["isNew"]?.asBoolean  ?: false
+                val search  = o["search"]?.asString?.takeIf { it.isNotBlank() }
                 try {
-                    writeFile(path, content, isNew)
+                    writeFile(path, content, isNew, search)
                     applied.add(path)
                     pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
                 } catch (e: Exception) {
@@ -203,17 +205,58 @@ class ChatToolWindowContent(private val project: Project) {
         if (applied.isNotEmpty()) SwingUtilities.invokeLater { startTestLoop(applied, 1) }
     }
 
-    private fun writeFile(path: String, content: String, isNew: Boolean) {
+    private fun writeFile(path: String, content: String, isNew: Boolean, search: String? = null) {
         val base = project.basePath ?: throw IllegalStateException("No project base path")
         val file = File("$base/$path")
+
         if (isNew) {
+            // New file — write complete content
             file.parentFile?.mkdirs()
             FileUtil.writeToFile(file, content)
             LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
+            return
+        }
+
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
+            ?: run {
+                // File doesn't exist yet even though isNew=false — create it
+                file.parentFile?.mkdirs()
+                FileUtil.writeToFile(file, content)
+                LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
+                return
+            }
+        val doc = FileDocumentManager.getInstance().getDocument(vf)
+            ?: throw IllegalStateException("Cannot open document for: $path")
+
+        if (search != null) {
+            // Surgical search-replace — only the targeted block changes, nothing else is touched
+            val current = doc.text
+
+            // Try exact match first
+            if (current.contains(search)) {
+                doc.setText(current.replaceFirst(search, content))
+                return
+            }
+
+            // Whitespace-normalized fallback: handles minor indentation/line-ending differences
+            val normCurrent = current.lines().joinToString("\n") { it.trimEnd() }
+            val normSearch  = search.lines().joinToString("\n") { it.trimEnd() }
+            val idx = normCurrent.indexOf(normSearch)
+            if (idx >= 0) {
+                // Map the normalized index back to the original string
+                val before = current.substring(0, idx)
+                val after  = current.substring(idx + normSearch.length)
+                doc.setText(before + content + after)
+                return
+            }
+
+            throw IllegalStateException(
+                "Could not find the search block in $path.\n" +
+                "The file may have changed since the AI read it. Please retry."
+            )
         } else {
-            val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
-            if (vf != null) FileDocumentManager.getInstance().getDocument(vf)?.setText(content)
-            else { FileUtil.writeToFile(file, content); LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) }
+            // No search block — full replacement (legacy fallback, should not normally happen)
+            doc.setText(content)
         }
     }
 
