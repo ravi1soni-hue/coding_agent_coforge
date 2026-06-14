@@ -120,21 +120,50 @@ object AiService {
             ProjectTypeDetector.ProjectType.UNKNOWN -> "Mobile"
         }
         append("""
-            You are an elite $platform developer. Implement the validated plan completely.
+            You are an elite $platform developer implementing code changes directly into the user's project.
 
-            STRICT OUTPUT RULES:
-            - For EVERY file you modify: <file_change path="relative/path/to/File.ext">COMPLETE FILE CONTENT</file_change>
-            - For NEW files: <new_file path="relative/path/to/NewFile.ext">COMPLETE FILE CONTENT</new_file>
-            - The file extension must match the language: .kt for Kotlin, .dart for Dart, .xml for XML, .yaml for YAML, etc.
-            - NEVER truncate with "// ... rest" or "// TODO". Output the full, complete file every time.
-            - NEVER write placeholder code. Everything must be real, working, production-quality code.
-            - If web search docs are in context, use the DOCUMENTED API — not what you remember from training.
-            - Use ONLY libraries from the project's dependency list unless adding a new one (and if so, also output the updated pubspec.yaml or build.gradle).
-            - After all code: write 2-3 sentences explaining what changed and why.
+            ══════════════════════════════════════════════════════
+            OUTPUT FORMAT — THIS IS MANDATORY, NO EXCEPTIONS:
+            ══════════════════════════════════════════════════════
+
+            Every single file you create or modify MUST be wrapped in one of these tags:
+
+            NEW FILE:
+            <new_file path="lib/screens/some_screen.dart">
+            // COMPLETE FILE CONTENTS HERE — not a snippet, the whole file
+            </new_file>
+
+            MODIFIED FILE:
+            <file_change path="lib/main.dart">
+            // COMPLETE FILE CONTENTS HERE — not a snippet, the whole file
+            </file_change>
+
+            ══════════════════════════════════════════════════════
+            ABSOLUTE PROHIBITIONS — VIOLATING ANY OF THESE IS WRONG:
+            ══════════════════════════════════════════════════════
+            ❌ NEVER write markdown code blocks (``` dart or ``` kotlin)
+            ❌ NEVER write "Step 1:", "Step 2:" tutorials or how-to guides
+            ❌ NEVER write "Here's what you need to do" or "You can now..."
+            ❌ NEVER write "// ... rest of file" or "// existing code here" or "// TODO"
+            ❌ NEVER truncate files — output the COMPLETE file every time
+            ❌ NEVER write placeholder code — everything must be real, working code
+            ❌ NEVER explain what the user should do manually — YOU do it in the file tags
+            ══════════════════════════════════════════════════════
+
+            OUTPUT STRUCTURE (follow exactly):
+            1. One <new_file> block for each new file
+            2. One <file_change> block for each modified file
+            3. After ALL file blocks: 2-3 sentences max explaining what changed
+
+            File extension rules: .kt = Kotlin, .dart = Dart, .xml = XML, .yaml = YAML/pubspec
+
+            If the request adds a new dependency, also output the modified pubspec.yaml or build.gradle.
+            Use ONLY libraries already in the project unless a new one is clearly required.
+            If web search docs are in context, use the documented API — not training memory.
         """.trimIndent())
 
         if (!deps.isEmpty()) {
-            append("\n\nProject dependencies (use ONLY these unless explicitly adding new ones):\n")
+            append("\n\nProject dependencies (use ONLY these unless adding new ones):\n")
             append(deps.toPromptContext())
         }
     }
@@ -169,14 +198,22 @@ object AiService {
     fun detectIntent(message: String): Intent {
         val lower = message.lowercase().trim()
         val tokens = lower.split(Regex("[\\s,?.!]+")).toSet()
-        val explainWords = setOf("what","why","how","explain","describe","understand","clarify","when","which","where","is","does","can","should","difference","meaning","tell")
+        val actionWords = setOf("create","implement","build","generate","write","add","make","new","develop","integrate","set up","setup")
         val fixWords = setOf("fix","debug","error","bug","crash","exception","issue","problem","broken","fails","failing","wrong","incorrect","not working","doesn't work","solve")
-        val simpleWords = setOf("rename","format","remove","delete","move","extract","inline","convert","change","update","modify","add import","sort")
+        val simpleWords = setOf("rename","format","remove","delete","move","extract","inline","convert","change","update","modify","sort")
+        val explainWords = setOf("what","why","how","explain","describe","understand","clarify","difference","meaning","tell me")
+
+        // Action words always override explain — "create" is never an explanation
+        val isAction = tokens.any { it in actionWords } || actionWords.any { lower.contains(it) }
+        val isFix = tokens.any { it in fixWords }
+        val isSimple = tokens.any { it in simpleWords }
+        val isExplain = (lower.endsWith("?") || explainWords.any { lower.contains(it) }) && !isAction
+
         return when {
-            lower.endsWith("?") || tokens.intersect(explainWords).size >= 2 && !tokens.any { it in setOf("create","implement","build","generate","write","add") } -> Intent.EXPLAIN
-            tokens.any { it in fixWords } -> Intent.FIX
-            tokens.any { it in simpleWords } && !lower.contains("create") && !lower.contains("implement") -> Intent.CODE_SIMPLE
-            else -> Intent.CODE_COMPLEX
+            isExplain -> Intent.EXPLAIN
+            isFix     -> Intent.FIX
+            isSimple && !isAction -> Intent.CODE_SIMPLE
+            else      -> Intent.CODE_COMPLEX
         }
     }
 
@@ -381,7 +418,17 @@ object AiService {
     private fun buildImplPrompt(msg: String, plan: String, ctx: String, history: List<Message>) = buildString {
         historyBlock(history).takeIf { it.isNotEmpty() }?.let { append("Conversation:\n$it\n\n") }
         ctx.takeIf { it.isNotBlank() }?.let { append("Code and web context:\n$it\n\n") }
-        append("Validated plan:\n$plan\n\nOriginal request: $msg\n\nImplement completely.")
+        append("""
+            Validated plan:
+            $plan
+
+            Original request: $msg
+
+            NOW IMPLEMENT THIS COMPLETELY.
+            Output ONLY <new_file> and <file_change> tagged blocks with full file contents.
+            Do NOT write any markdown code blocks, tutorials, or step-by-step instructions.
+            Every file that needs to exist or change must appear inside a tag. Start now.
+        """.trimIndent())
     }
 
     // ─── Model callers ────────────────────────────────────────────────────────
