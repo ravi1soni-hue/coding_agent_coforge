@@ -76,7 +76,7 @@ class ChatToolWindowContent(private val project: Project) {
                 js("""window.__bridge = function(m){ ${q.inject("m")} }; window._bridgeReady(window.__bridge);""")
                 SwingUtilities.invokeLater { sendFileList() }
             }
-        }, browser?.cefBrowser)
+        }, browser?.cefBrowser ?: return)
     }
 
     private fun loadUI() {
@@ -212,20 +212,24 @@ class ChatToolWindowContent(private val project: Project) {
 
     private fun runBuild() {
         js("""App.openTerminal("Building...")""")
-        val exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit =
-            if (isFlutter) TerminalExecutor::flutterBuild else TerminalExecutor::buildDebug
+        val exec = if (isFlutter)
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit -> TerminalExecutor.flutterBuild(project, onLine, onDone) }
+        else
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit -> TerminalExecutor.buildDebug(project, onLine, onDone) }
         runCmd(exec) { ok, out -> if (!ok) autoFix(out, "build") }
     }
 
     private fun runLint() {
         js("""App.openTerminal("Linting...")""")
-        val exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit =
-            if (isFlutter) TerminalExecutor::flutterAnalyze else TerminalExecutor::runLint
+        val exec = if (isFlutter)
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit -> TerminalExecutor.flutterAnalyze(project, onLine, onDone) }
+        else
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit -> TerminalExecutor.runLint(project, onLine, onDone) }
         runCmd(exec) { ok, out -> if (!ok) autoFix(out, "lint") }
     }
 
     private fun runCmd(
-        exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit,
+        exec: ((String)->Unit, (TerminalExecutor.CommandResult)->Unit) -> Unit,
         onDone: (Boolean, String) -> Unit
     ) {
         exec(
@@ -240,8 +244,10 @@ class ChatToolWindowContent(private val project: Project) {
     private fun startTestLoop(changed: List<String>, attempt: Int) {
         if (attempt > 3) { js("""App.sysLine("⚠️ Gave up after 3 attempts")"""); return }
         js("""App.openTerminal("Test run $attempt/3"); App.sysLine("🤖 Attempt $attempt/3 — running tests...")""")
-        val exec: (((String)->Unit),((TerminalExecutor.CommandResult)->Unit))->Unit =
-            if (isFlutter) TerminalExecutor::flutterTest else TerminalExecutor::runTests
+        val exec = if (isFlutter)
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit -> TerminalExecutor.flutterTest(project, onLine, onDone) }
+        else
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit -> TerminalExecutor.runTests(project, onLine, onDone) }
         exec(
             { line -> termLine(line) },
             { r    -> SwingUtilities.invokeLater {
