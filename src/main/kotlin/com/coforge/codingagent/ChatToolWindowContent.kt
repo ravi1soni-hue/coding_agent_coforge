@@ -8,7 +8,9 @@ import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
@@ -16,16 +18,14 @@ import com.intellij.ui.jcef.JBCefJSQuery
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
-import java.awt.BorderLayout
-import java.awt.Toolkit
+import java.awt.*
 import java.awt.datatransfer.StringSelection
+import java.awt.geom.RoundRectangle2D
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
 import javax.imageio.ImageIO
-import javax.swing.JComponent
-import javax.swing.JLabel
-import javax.swing.JPanel
+import javax.swing.*
 import javax.swing.SwingUtilities
 
 class ChatToolWindowContent(private val project: Project) {
@@ -45,6 +45,9 @@ class ChatToolWindowContent(private val project: Project) {
     private val history = mutableListOf<Message>()
 
     init {
+        // Ensure JCEF is enabled in the registry (disabled by default in some AS builds)
+        tryEnableJcef()
+
         if (JBCefApp.isSupported()) {
             browser  = JBCefBrowser()
             jsQuery  = JBCefJSQuery.create(browser)
@@ -57,14 +60,116 @@ class ChatToolWindowContent(private val project: Project) {
             Thread { ProjectIndexer.warmUp(project); CodebaseGraph.build(project) }
                 .apply { isDaemon = true; name = "CoforgeWarmup" }.start()
         } else {
-            // Fallback for environments without JCEF
             browser  = null
             jsQuery  = null
-            contentPanel = JPanel(BorderLayout()).apply {
-                add(JLabel("JCEF is not supported in this environment. " +
-                    "Run with a JetBrains Runtime JDK.", JLabel.CENTER))
+            contentPanel = buildJcefSetupPanel()
+        }
+    }
+
+    /**
+     * Android Studio ships with the JetBrains Runtime but has JCEF disabled in its registry
+     * by default. Enabling it here and on first-time setup covers most installs automatically.
+     */
+    private fun tryEnableJcef() {
+        try {
+            val key = Registry.get("ide.browser.jcef.enabled")
+            if (!key.asBoolean()) key.setValue(true)
+        } catch (_: Exception) { /* registry key absent in very old builds — ignore */ }
+    }
+
+    /**
+     * Shown only when JCEF cannot be activated at runtime (e.g. non-JBR JDK).
+     * Provides a one-click fix and manual instructions.
+     */
+    private fun buildJcefSetupPanel(): JPanel {
+        val bg   = Color(13, 17, 23)
+        val card = Color(22, 27, 34)
+        val text = Color(230, 237, 243)
+        val mute = Color(125, 133, 144)
+        val accn = Color(193, 122, 94)
+
+        val panel = object : JPanel(GridBagLayout()) {
+            override fun paintComponent(g: Graphics) { g.color = bg; g.fillRect(0,0,width,height) }
+        }.apply { isOpaque = false }
+
+        val gbc = GridBagConstraints().apply {
+            gridx = 0; gridy = GridBagConstraints.RELATIVE
+            insets = Insets(6, 0, 6, 0); anchor = GridBagConstraints.CENTER
+            fill = GridBagConstraints.HORIZONTAL
+        }
+
+        // Logo
+        panel.add(object : JComponent() {
+            init { preferredSize = Dimension(56, 56) }
+            override fun paintComponent(g: Graphics) {
+                val g2 = g as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.paint = GradientPaint(0f,0f, accn, 56f,56f, Color(139,92,246))
+                g2.fillOval(0,0,56,56); g2.paint = null
+                g2.color = Color.WHITE; g2.font = Font("Inter", Font.BOLD, 26)
+                val fm = g2.fontMetrics; g2.drawString("C", 15, 28 + fm.ascent/2 - 1)
+            }
+        }, gbc)
+
+        panel.add(JLabel("Coforge AI — One-time Setup").apply {
+            foreground = text; font = Font("Inter", Font.BOLD, 16)
+            horizontalAlignment = SwingConstants.CENTER
+        }, gbc)
+
+        panel.add(JLabel("<html><center>Android Studio's built-in browser (JCEF)<br>needs to be enabled and the IDE restarted.</center></html>").apply {
+            foreground = mute; font = Font("Inter", Font.PLAIN, 12)
+            horizontalAlignment = SwingConstants.CENTER
+        }, gbc)
+
+        // Primary fix button
+        val fixBtn = object : JButton("Enable JCEF & Restart Android Studio") {
+            init {
+                font = Font("Inter", Font.BOLD, 13); foreground = Color.WHITE
+                isFocusPainted = false; isContentAreaFilled = false; isBorderPainted = false
+                border = BorderFactory.createEmptyBorder(10, 20, 10, 20)
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                addActionListener {
+                    try {
+                        Registry.get("ide.browser.jcef.enabled").setValue(true)
+                        val answer = Messages.showYesNoDialog(
+                            "JCEF has been enabled.\n\nRestart Android Studio now to apply?",
+                            "Restart Required", "Restart Now", "Later", null)
+                        if (answer == Messages.YES)
+                            ApplicationManager.getApplication().restart()
+                    } catch (e: Exception) {
+                        Messages.showErrorDialog(
+                            "Could not enable automatically:\n${e.message}\n\nPlease follow the manual steps below.",
+                            "Enable JCEF")
+                    }
+                }
+            }
+            override fun paintComponent(g: Graphics) {
+                val g2 = g as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = accn
+                g2.fill(RoundRectangle2D.Float(0f,0f,width.toFloat(),height.toFloat(),10f,10f))
+                super.paintComponent(g)
             }
         }
+        panel.add(fixBtn, gbc)
+
+        // Manual instructions
+        panel.add(JLabel("<html><center><b style='color:#e8e8e8'>Manual fix (if button above fails):</b><br><br>" +
+            "1. <b>Help → Find Action</b> → type <b>Registry</b> → open it<br>" +
+            "2. Search <code>ide.browser.jcef.enabled</code> → tick it ON<br>" +
+            "3. Restart Android Studio<br><br>" +
+            "<i>Or: Help → Edit Custom VM Options → add:</i><br>" +
+            "<code>-Dide.browser.jcef.enabled=true</code>" +
+            "</center></html>").apply {
+            foreground = mute; font = Font("Inter", Font.PLAIN, 11)
+            horizontalAlignment = SwingConstants.CENTER
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Color(48,54,61)),
+                BorderFactory.createEmptyBorder(12,16,12,16))
+            background = card; isOpaque = true
+        }, gbc)
+
+        return panel
     }
 
     // ── Bridge setup ──────────────────────────────────────────────────────────
