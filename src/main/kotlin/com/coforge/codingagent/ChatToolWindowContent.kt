@@ -825,6 +825,7 @@ class ChatToolWindowContent(private val project: Project) {
             init {
                 isOpaque = false; border = JBUI.Borders.empty(3, 0, 6, 0)
                 alignmentX = Component.LEFT_ALIGNMENT
+                val self = this
 
                 val left = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
                 left.add(RoundedLabel(if (isNew) "NEW" else "EDIT").apply {
@@ -837,7 +838,7 @@ class ChatToolWindowContent(private val project: Project) {
                 })
 
                 val right = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply { isOpaque = false }
-                right.add(tinyBtn("Skip") { parent?.remove(this@object); parent?.revalidate() })
+                right.add(tinyBtn("Skip") { self.parent?.remove(self); self.parent?.revalidate() })
                 right.add(tinyBtn("Diff") {
                     val base = project.basePath ?: return@tinyBtn
                     val old = if (isNew) "" else try { File("$base/$path").readText() } catch (_: Exception) { "" }
