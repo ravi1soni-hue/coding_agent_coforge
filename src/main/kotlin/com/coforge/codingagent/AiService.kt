@@ -20,9 +20,9 @@ data class Message(val role: String, val content: String)
  * Kimi decides what context it needs — we fetch exactly that.
  */
 data class KimiPlan(
-    val action: String,            // EXPLAIN_ONLY | CREATE_FILES | MODIFY_FILES | FIX_BUG | MIXED
-    val requestedFiles: List<String>,  // relative paths Kimi wants to read in full
-    val searchQueries: List<String>,   // web queries Kimi wants run
+    val action: String,
+    val requestedFiles: List<String>,
+    val searchQueries: List<String>,
     val rawText: String
 ) {
     val isExplainOnly get() = action.equals("EXPLAIN_ONLY", ignoreCase = true)
@@ -49,25 +49,18 @@ object AiService {
     // ─── System prompts ───────────────────────────────────────────────────────
 
     /**
-     * Kimi is the brain of the whole pipeline.
-     *
-     * It receives: conversation history + active file/editor context + project
-     * file listing (paths + class/function names) + the current user message.
-     *
-     * It outputs a structured CONTEXT PLAN + ACTION PLAN in one shot:
-     * - Which files it needs to read (by path) to understand the codebase
-     * - Whether web search is useful and exactly what to search for
-     * - What action is needed (create files, modify, explain, fix, mixed)
-     * - A full implementation plan
-     *
-     * We then fetch exactly what Kimi asks for and pass it downstream.
-     * Nothing else in the pipeline makes decisions about what context to load.
+     * Gap 5: projectRules from COFORGE.md injected into every Kimi prompt.
+     * Kimi is the brain: reads history + context + project listing, outputs a CONTEXT PLAN.
      */
-    private fun kimiPlannerSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
+    private fun kimiPlannerSystem(
+        info: ProjectTypeDetector.ProjectInfo,
+        deps: ProjectDependencyAnalyzer.ProjectDeps,
+        projectRules: String = ""
+    ) = buildString {
         val platform = when (info.type) {
-            ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter / Dart"
+            ProjectTypeDetector.ProjectType.FLUTTER      -> "Flutter / Dart"
             ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android / ${info.mainLanguage}"
-            ProjectTypeDetector.ProjectType.UNKNOWN -> "Mobile"
+            ProjectTypeDetector.ProjectType.UNKNOWN      -> "Mobile"
         }
         append("""
             You are a senior $platform developer and AI coding agent brain.
@@ -89,10 +82,11 @@ object AiService {
             SEARCH_QUERIES: [comma-separated web search queries, or NONE if not needed]
 
             Rules for FILES_NEEDED:
-            - List only files that are DIRECTLY relevant to this task
+            - List EVERY file that your plan will CREATE or MODIFY — this is mandatory, not optional
+            - Also list files you need to READ to understand context
             - Use exact relative paths from the project listing (e.g. lib/main.dart)
             - If the active file is already included in context, do not list it again
-            - 0 to 6 files max — be precise, not exhaustive
+            - 0 to 8 files max
 
             Rules for SEARCH_QUERIES:
             - Only request search if the task involves a library version, an API you might not know precisely,
@@ -130,63 +124,109 @@ object AiService {
             append("\n\nPROJECT DEPENDENCIES:\n")
             append(deps.toPromptContext())
         }
+
+        // Gap 5: project-specific rules always injected
+        if (projectRules.isNotBlank()) {
+            append("\n\n════════════════════════════════════════════════════════\n")
+            append("PROJECT-SPECIFIC RULES (from COFORGE.md — must be followed for every response):\n")
+            append(projectRules)
+        }
     }
 
     /**
-     * Gemini is the quality gate. It receives Kimi's plan PLUS the full context
-     * that was fetched based on Kimi's requests. It validates and improves.
+     * Gap 7: Gemini is now a PRE-WRITE VERIFIER, not a plan reviewer.
+     *
+     * Before GPT writes anything, Gemini checks:
+     * 1. Are ALL files that the plan will modify present in the fetched context?
+     *    If not → output MISSING_FILES so we can fetch them before GPT runs.
+     * 2. For each planned edit, quote the EXACT existing code block that will be replaced.
+     *    GPT needs this verbatim for its <search> sections.
+     * 3. Are the APIs/classes referenced in the plan real and present in the fetched files?
      */
-    private fun geminiReviewSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
+    private fun geminiVerifierSystem(
+        info: ProjectTypeDetector.ProjectInfo,
+        deps: ProjectDependencyAnalyzer.ProjectDeps,
+        projectRules: String = ""
+    ) = buildString {
         val platform = when (info.type) {
-            ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter/Dart"
+            ProjectTypeDetector.ProjectType.FLUTTER      -> "Flutter/Dart"
             ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android/Kotlin"
-            ProjectTypeDetector.ProjectType.UNKNOWN -> "Mobile"
+            ProjectTypeDetector.ProjectType.UNKNOWN      -> "Mobile"
         }
         append("""
-            You are a rigorous $platform senior code reviewer and quality gate.
+            You are a $platform pre-write verifier for an AI coding agent pipeline.
 
             You receive:
             - Kimi's situation analysis and implementation plan
-            - The actual file contents and web search results that were fetched based on that plan
-            - The full conversation history
+            - The actual file contents that were fetched based on that plan
+            - The current user request
 
-            Your job: validate and improve the plan with the full context now available.
+            YOUR JOB: Verify the plan is implementable before GPT writes anything.
 
-            Check:
-            - Does the plan actually solve what the user needs (including things not yet delivered)?
-            - Do the APIs/methods/classes referenced in the plan actually exist in the fetched files?
-            - Are there threading issues, lifecycle bugs, missing null checks, memory leaks?
-            - Are there missing route registrations, missing imports, missing pubspec entries?
-            - Does the plan account for the project's actual code patterns (not generic patterns)?
-            - If web search results are in context, does the plan match the current documented API?
+            ── CHECK 1: FILES COVERAGE ──────────────────────────────────────────
+            Every file the plan will EDIT must be in the fetched context.
+            If any file the plan edits is NOT in the fetched context, output:
+            MISSING_FILES: relative/path/file1.dart, relative/path/file2.kt
+            (These will be auto-fetched before GPT runs.)
 
-            IMPORTANT: For every file edit in the plan, note the EXACT existing code block that will
-            be replaced (by quoting a key line or two from the fetched file content). GPT will need
-            this to produce a correct <search> block. If you cannot identify the exact existing code,
-            flag it in the plan so GPT knows to locate it carefully.
+            ── CHECK 2: EXACT CODE QUOTES ───────────────────────────────────────
+            For EACH planned edit to an existing file, find the exact code block
+            that needs to change and quote it verbatim from the fetched file content.
+            Format each one as:
+            EDIT_ANCHOR [relative/path/file.dart]:
+            ```
+            exact verbatim code from the file that will be replaced
+            ```
+            GPT MUST use these exact quotes in its <search> sections.
 
-            Output: the validated and improved plan only — no code, no markdown code blocks.
-            Keep the same structure as Kimi's plan (ACTION, WHAT IS STILL NEEDED, PLAN steps).
+            ── CHECK 3: API CORRECTNESS ─────────────────────────────────────────
+            Verify that classes, methods, and widgets referenced in the plan actually
+            exist in the fetched files. Flag anything that doesn't exist.
+
+            ── CHECK 4: MISSING IMPORTS / ROUTES ────────────────────────────────
+            Note any imports that will need to be added, route registrations, or
+            pubspec entries. Flag them explicitly for GPT.
+
+            Output format:
+            VERIFICATION_STATUS: PASS | NEEDS_ADJUSTMENT
+
+            [If MISSING_FILES exist, list them — the system will auto-fetch.]
+
+            VERIFIED PLAN:
+            [The same plan as Kimi's, but augmented with EDIT_ANCHOR quotes and any corrections.
+             Keep ACTION, WHAT IS STILL NEEDED, and PLAN structure.]
+
+            Do not write code blocks for the implementation. Only quote existing code for anchors.
         """.trimIndent())
 
         if (!deps.isEmpty()) {
             append("\n\nProject dependencies:\n")
             append(deps.toPromptContext())
         }
+
+        if (projectRules.isNotBlank()) {
+            append("\n\nPROJECT RULES:\n$projectRules")
+        }
     }
 
     /**
-     * GPT-5 is the executor. It receives Gemini's validated plan + all context
-     * and produces the actual output — files, explanations, or both.
+     * GPT-5 is the executor. Receives verified plan + full context (with edit anchors)
+     * and produces actual file output.
+     *
+     * Gap 5: projectRules injected here too so GPT follows project conventions.
      */
-    private fun gptExecuteSystem(info: ProjectTypeDetector.ProjectInfo, deps: ProjectDependencyAnalyzer.ProjectDeps) = buildString {
+    private fun gptExecuteSystem(
+        info: ProjectTypeDetector.ProjectInfo,
+        deps: ProjectDependencyAnalyzer.ProjectDeps,
+        projectRules: String = ""
+    ) = buildString {
         val platform = when (info.type) {
-            ProjectTypeDetector.ProjectType.FLUTTER -> "Flutter/Dart"
+            ProjectTypeDetector.ProjectType.FLUTTER      -> "Flutter/Dart"
             ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> "Android/Kotlin"
-            ProjectTypeDetector.ProjectType.UNKNOWN -> "Mobile"
+            ProjectTypeDetector.ProjectType.UNKNOWN      -> "Mobile"
         }
         append("""
-            You are an elite $platform developer executing a fully validated implementation plan.
+            You are an elite $platform developer executing a fully verified implementation plan.
 
             The plan's ACTION field tells you exactly what to produce. Follow it precisely.
 
@@ -206,8 +246,9 @@ object AiService {
             <file_change path="relative/path/to/ExistingFile.ext">
             <search>
             EXACT VERBATIM COPY of the existing code block you are replacing.
-            Must match the file character-for-character. Copy it from the context — do not paraphrase.
-            Include enough surrounding lines (the full function, class, or block) so it is unambiguous.
+            Use the EDIT_ANCHOR quotes from the verified plan — they are already extracted for you.
+            Must match the file character-for-character.
+            Include the full function/class/block so it is unambiguous.
             </search>
             <replace>
             THE NEW CODE that replaces the search block above.
@@ -223,7 +264,7 @@ object AiService {
             ❌ NEVER write Step-by-step tutorial instructions
             ❌ NEVER write "// ... rest of file", "// existing code", "// TODO"
             ❌ NEVER put the entire file in <search> or <replace> — only the changed block
-            ❌ NEVER make up code for the <search> block — copy it exactly from the provided file context
+            ❌ NEVER make up code for the <search> block — use the EDIT_ANCHOR from the plan
             ❌ NEVER tell the user what to do — you do it inside the file tags
 
             After all file tags: 1-2 sentences max describing what was created/changed.
@@ -238,6 +279,13 @@ object AiService {
         if (!deps.isEmpty()) {
             append("\n\nProject dependencies:\n")
             append(deps.toPromptContext())
+        }
+
+        // Gap 5: project rules always injected into executor too
+        if (projectRules.isNotBlank()) {
+            append("\n\n════════════════════════════════════════════════════════\n")
+            append("PROJECT RULES (from COFORGE.md — must be followed):\n")
+            append(projectRules)
         }
     }
 
@@ -267,22 +315,25 @@ object AiService {
         val deps = project?.let { ProjectDependencyAnalyzer.analyze(it) }
             ?: ProjectDependencyAnalyzer.ProjectDeps(emptyList(), null, null, null, null, null, null, null)
 
-        // ── Step 1: Kimi decides what it needs — no pre-fetching ─────────────
-        onStatus("Analyzing request...")
+        // Gap 5: read persistent project rules from COFORGE.md
+        val projectRules = readProjectRules(project)
 
-        // Give Kimi the project file listing so it can ask for specific files
+        // Gap 6: pass file outlines (paths + all symbols) to Kimi for 2-pass context
         val projectListing = try {
             ApplicationManager.getApplication().runReadAction<String> {
                 buildProjectListing(project)
             }
         } catch (_: Exception) { "" }
 
-        // Fetch any URLs the user pasted — these are explicit, not rule-decided
+        // Fetch URLs the user pasted — explicit, not rule-decided
         val urlContext = CompletableFuture.supplyAsync { UrlContentFetcher.fetchAll(userMessage) }
+
+        // ── Step 1: Kimi decides what it needs ───────────────────────────────
+        onStatus("Analyzing request...")
 
         callModelBlocking(
             settings.kimiModel, settings.kimiApiKey,
-            kimiPlannerSystem(info, deps),
+            kimiPlannerSystem(info, deps, projectRules),
             buildPlannerPrompt(userMessage, history, context, projectListing)
         ).thenCompose { kimiRaw ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture(kimiRaw)
@@ -290,22 +341,21 @@ object AiService {
 
             val plan = parseKimiPlan(kimiRaw)
 
-            // ── Step 2: Fetch exactly what Kimi asked for, in parallel ────────
+            // Gap 2: auto-expand FILES_NEEDED with file paths found in Kimi's plan text
+            val expandedFiles = expandFilesNeeded(plan, kimiRaw, project)
+
+            // ── Step 2: Fetch exactly what Kimi asked for (expanded), in parallel ─
             onStatus("Gathering context...")
 
-            val fileFuture = CompletableFuture.supplyAsync {
-                fetchRequestedFiles(project, plan.requestedFiles)
-            }
-            val searchFuture = CompletableFuture.supplyAsync {
-                runSearchQueries(plan.searchQueries)
-            }
+            val fileFuture   = CompletableFuture.supplyAsync { fetchRequestedFiles(project, expandedFiles) }
+            val searchFuture = CompletableFuture.supplyAsync { runSearchQueries(plan.searchQueries) }
 
             CompletableFuture.allOf(fileFuture, searchFuture, urlContext)
                 .thenApply {
-                    val fileCtx    = try { fileFuture.get() } catch (_: Exception) { "" }
-                    val searchCtx  = try { searchFuture.get() } catch (_: Exception) { "" }
-                    val urlCtx     = try { urlContext.get() } catch (_: Exception) { "" }
-                    val fullCtx = listOfNotNull(
+                    val fileCtx   = try { fileFuture.get() } catch (_: Exception) { "" }
+                    val searchCtx = try { searchFuture.get() } catch (_: Exception) { "" }
+                    val urlCtx    = try { urlContext.get() } catch (_: Exception) { "" }
+                    val fullCtx   = listOfNotNull(
                         context.takeIf { it.isNotBlank() && it != "No file currently open." },
                         fileCtx.takeIf { it.isNotBlank() },
                         searchCtx.takeIf { it.isNotBlank() },
@@ -316,47 +366,161 @@ object AiService {
         }.thenCompose { (plan, fullCtx) ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture(plan.rawText to fullCtx)
 
-            // ── Step 3: Gemini validates with full context ────────────────────
-            // Skip for pure explanations — no files involved, no compatibility to check
+            // Skip Gemini for pure explanations — no file edits involved
             if (plan.isExplainOnly) {
                 return@thenCompose CompletableFuture.completedFuture(plan.rawText to fullCtx)
             }
 
-            onStatus("Validating plan...")
+            // ── Step 3: Gemini verifies plan and fetches any missing files ────
+            // Gap 7: Gemini is now a pre-write verifier, not a plan reviewer
+            onStatus("Verifying plan...")
             callModelBlocking(
                 settings.geminiModel, settings.geminiApiKey,
-                geminiReviewSystem(info, deps),
-                buildGeminiPrompt(userMessage, plan.rawText, fullCtx, history)
-            ).thenApply { review ->
-                if (review.isNotBlank()) {
-                    onReasoning("GEMINI REVIEW:\n$review")
-                    review to fullCtx
+                geminiVerifierSystem(info, deps, projectRules),
+                buildGeminiVerifyPrompt(userMessage, plan.rawText, fullCtx, history)
+            ).thenCompose { review ->
+                if (review.isBlank()) return@thenCompose CompletableFuture.completedFuture(plan.rawText to fullCtx)
+                onReasoning("GEMINI VERIFICATION:\n$review")
+
+                // Gap 2: Gemini may flag MISSING_FILES — fetch them and augment context
+                val missingFiles = parseMissingFiles(review)
+                if (missingFiles.isEmpty()) {
+                    CompletableFuture.completedFuture(review to fullCtx)
                 } else {
-                    plan.rawText to fullCtx
+                    onStatus("Fetching ${missingFiles.size} additional file(s)...")
+                    CompletableFuture.supplyAsync {
+                        val extra = fetchRequestedFiles(project, missingFiles)
+                        val augmented = if (extra.isBlank()) fullCtx
+                                        else "$fullCtx\n\n=== ADDITIONALLY FETCHED FILES ===\n$extra"
+                        review to augmented
+                    }
                 }
             }
-        }.thenCompose { (validatedPlan, fullCtx) ->
+        }.thenCompose { (verifiedPlan, fullCtx) ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
 
-            // ── Step 4: GPT executes the validated plan ───────────────────────
-            onStatus("Working...")
-            callModelStreaming(
-                settings.gptModel, settings.gptApiKey,
-                gptExecuteSystem(info, deps),
-                buildExecutePrompt(userMessage, validatedPlan, fullCtx, history),
-                images, onToken
+            // ── Step 4: GPT implements, with agentic retry on search failures ─
+            // Gap 1: after GPT streams, verify search blocks → retry once if any fail
+            onStatus("Implementing...")
+            implementWithAgenticRetry(
+                settings, info, deps, projectRules,
+                userMessage, verifiedPlan, fullCtx, history, images, project,
+                onStatus, onToken
             )
         }
         .thenAccept { onComplete(it) }
         .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
     }
 
-    // ─── Kimi plan parser ─────────────────────────────────────────────────────
+    /**
+     * Gap 1 (Agentic iteration): GPT implements, then we verify all <search> blocks
+     * exist in the real files. If any fail, send GPT the actual file content and retry once.
+     */
+    private fun implementWithAgenticRetry(
+        settings: AppSettingsState,
+        info: ProjectTypeDetector.ProjectInfo,
+        deps: ProjectDependencyAnalyzer.ProjectDeps,
+        projectRules: String,
+        userMessage: String,
+        verifiedPlan: String,
+        fullCtx: String,
+        history: List<Message>,
+        images: List<String>,
+        project: Project?,
+        onStatus: (String) -> Unit,
+        onToken: (String) -> Unit
+    ): CompletableFuture<String> {
+        return callModelStreaming(
+            settings.gptModel, settings.gptApiKey,
+            gptExecuteSystem(info, deps, projectRules),
+            buildExecutePrompt(userMessage, verifiedPlan, fullCtx, history),
+            images, onToken
+        ).thenCompose { output ->
+            if (stopRequested) return@thenCompose CompletableFuture.completedFuture(output)
+
+            // Verify <search> blocks against actual files on disk
+            val failures = verifySearchBlocks(output, project)
+            if (failures.isEmpty()) return@thenCompose CompletableFuture.completedFuture(output)
+
+            // One agentic retry: inject actual file content for failing blocks
+            onStatus("Correcting ${failures.size} search block(s)...")
+            callModelStreaming(
+                settings.gptModel, settings.gptApiKey,
+                gptExecuteSystem(info, deps, projectRules),
+                buildSearchRetryPrompt(userMessage, verifiedPlan, fullCtx, history, output, failures),
+                images, onToken
+            )
+        }
+    }
+
+    // ─── Gap 1: Search block verification ────────────────────────────────────
+
+    data class SearchFailure(val path: String, val searchBlock: String, val actualContent: String)
 
     /**
-     * Reads Kimi's structured output to extract what context it needs.
-     * Kimi makes the decisions — this just reads them.
+     * After GPT generates output, check every <search> block against the actual file on disk.
+     * Returns list of failures (where search text wasn't found in the file).
      */
+    private fun verifySearchBlocks(gptOutput: String, project: Project?): List<SearchFailure> {
+        val base = project?.basePath ?: return emptyList()
+        val failures = mutableListOf<SearchFailure>()
+        val re = Regex("""<file_change\s+path="([^"]+)">\s*<search>([\s\S]*?)</search>""")
+        re.findAll(gptOutput).forEach { m ->
+            val path   = m.groupValues[1].trim()
+            val search = m.groupValues[2].trim()
+            val file   = java.io.File("$base/$path")
+            if (!file.exists()) {
+                failures.add(SearchFailure(path, search, "[File does not exist: $path]"))
+                return@forEach
+            }
+            val content = try { file.readText(Charsets.UTF_8) } catch (_: Exception) { return@forEach }
+            // Exact match
+            if (content.contains(search)) return@forEach
+            // Whitespace-normalized match
+            val normContent = content.lines().joinToString("\n") { it.trimEnd() }
+            val normSearch  = search.lines().joinToString("\n") { it.trimEnd() }
+            if (!normContent.contains(normSearch)) {
+                failures.add(SearchFailure(path, search, content.take(6000)))
+            }
+        }
+        return failures
+    }
+
+    // ─── Gap 2: FILES_NEEDED auto-expansion ──────────────────────────────────
+
+    /**
+     * Scans Kimi's raw plan text for file path patterns and adds any that exist on disk
+     * to the files-to-fetch list. Catches cases where Kimi mentions a file in the plan
+     * but forgets to list it under FILES_NEEDED.
+     */
+    private fun expandFilesNeeded(plan: KimiPlan, kimiRaw: String, project: Project?): List<String> {
+        val base = project?.basePath ?: return plan.requestedFiles
+        val expanded = plan.requestedFiles.toMutableSet()
+
+        // Scan plan text for paths like lib/foo/bar.dart, app/src/main/.../Foo.kt
+        val filePathRe = Regex("""(?:lib|app|src|android|ios|test|feature|data|domain|presentation)/[\w/\-]+\.(?:dart|kt|java|xml|yaml|gradle|kts)""")
+        filePathRe.findAll(kimiRaw).forEach { m ->
+            val path = m.value.trim()
+            if (java.io.File("$base/$path").exists()) {
+                expanded.add(path)
+            }
+        }
+        return expanded.toList()
+    }
+
+    // ─── Gap 7: Parse MISSING_FILES from Gemini's verification output ─────────
+
+    private fun parseMissingFiles(geminiOutput: String): List<String> {
+        val line = geminiOutput.lines().firstOrNull {
+            it.trim().startsWith("MISSING_FILES:", ignoreCase = true)
+        } ?: return emptyList()
+        val value = line.substringAfter(":").trim()
+        return if (value.isBlank() || value.equals("none", ignoreCase = true)) emptyList()
+               else value.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
+    // ─── Kimi plan parser ─────────────────────────────────────────────────────
+
     private fun parseKimiPlan(raw: String): KimiPlan {
         fun extractLine(key: String): String {
             val line = raw.lines().firstOrNull {
@@ -368,25 +532,18 @@ object AiService {
         val action = extractLine("ACTION").takeIf { it.isNotBlank() } ?: "CREATE_FILES"
 
         val filesLine = extractLine("FILES_NEEDED")
-        val requestedFiles = if (filesLine.isBlank() || filesLine.equals("none", ignoreCase = true)) {
-            emptyList()
-        } else {
-            filesLine.split(",").map { it.trim() }.filter { it.isNotBlank() }
-        }
+        val requestedFiles = if (filesLine.isBlank() || filesLine.equals("none", ignoreCase = true)) emptyList()
+                             else filesLine.split(",").map { it.trim() }.filter { it.isNotBlank() }
 
         val searchLine = extractLine("SEARCH_QUERIES")
-        val searchQueries = if (searchLine.isBlank() || searchLine.equals("none", ignoreCase = true)) {
-            emptyList()
-        } else {
-            searchLine.split(",").map { it.trim() }.filter { it.isNotBlank() }
-        }
+        val searchQueries = if (searchLine.isBlank() || searchLine.equals("none", ignoreCase = true)) emptyList()
+                            else searchLine.split(",").map { it.trim() }.filter { it.isNotBlank() }
 
         return KimiPlan(action, requestedFiles, searchQueries, raw)
     }
 
-    // ─── Context fetchers (driven by Kimi's output) ───────────────────────────
+    // ─── Context fetchers ─────────────────────────────────────────────────────
 
-    /** Read exactly the files Kimi asked for — not a TF-IDF ranking, Kimi's explicit request. */
     private fun fetchRequestedFiles(project: Project?, paths: List<String>): String {
         if (project == null || paths.isEmpty()) return ""
         val base = project.basePath ?: return ""
@@ -404,18 +561,30 @@ object AiService {
         return sb.toString().trim()
     }
 
-    /** Run exactly the search queries Kimi specified — no rules about when to search. */
     private fun runSearchQueries(queries: List<String>): String {
         if (queries.isEmpty()) return ""
-        val results = queries.mapNotNull { query ->
+        return queries.mapNotNull { query ->
             try { WebSearchService.search(query) } catch (_: Exception) { null }
-        }
-        return results.joinToString("\n\n---\n\n").trim()
+        }.joinToString("\n\n---\n\n").trim()
     }
 
-    // ─── Context helpers ──────────────────────────────────────────────────────
+    // ─── Gap 5: COFORGE.md / .coforge-rules reader ───────────────────────────
 
-    /** Project file listing: paths + top symbols, no file contents. Kimi uses this to decide what to read. */
+    fun readProjectRules(project: Project?): String {
+        val base = project?.basePath ?: return ""
+        return listOf("COFORGE.md", ".coforge-rules", "coforge.md", ".coforge")
+            .firstNotNullOfOrNull { name ->
+                runCatching {
+                    val f = java.io.File("$base/$name")
+                    if (f.exists() && f.isFile) f.readText(Charsets.UTF_8).trim().take(4000)
+                    else null
+                }.getOrNull()?.takeIf { it.isNotBlank() }
+            } ?: ""
+    }
+
+    // ─── Gap 6: Project file listing with full symbol set ────────────────────
+
+    /** Build file outline: paths + ALL class/function symbols. No file content. */
     private fun buildProjectListing(project: Project?): String {
         if (project == null) return ""
         return try {
@@ -424,7 +593,8 @@ object AiService {
             buildString {
                 append("PROJECT FILES (${entries.size} source files):\n")
                 entries.forEach { f ->
-                    val syms = if (f.symbols.isNotEmpty()) " [${f.symbols.take(4).joinToString(", ")}]" else ""
+                    // Gap 6: include more symbols (10 instead of 4) for better context
+                    val syms = if (f.symbols.isNotEmpty()) " [${f.symbols.take(10).joinToString(", ")}]" else ""
                     append("  ${f.relativePath}$syms\n")
                 }
             }
@@ -445,12 +615,13 @@ object AiService {
         val settings = AppSettingsState.instance
         val info = ProjectTypeDetector.detect(project)
         val deps = ProjectDependencyAnalyzer.analyze(project)
+        val projectRules = readProjectRules(project)
         val fileList = changedFiles.joinToString(", ")
         val fileContents = fetchRequestedFiles(project, changedFiles)
 
         onStatus("Analyzing failures...")
         callModelBlocking(settings.kimiModel, settings.kimiApiKey,
-            kimiPlannerSystem(info, deps),
+            kimiPlannerSystem(info, deps, projectRules),
             """
             ═══ SITUATION ═══
             Test failures occurred after changes to: $fileList
@@ -469,12 +640,81 @@ object AiService {
             """.trimIndent()
         ).thenCompose { plan ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
-            onReasoning(plan)
             onStatus("Fixing...")
             callModelStreaming(settings.gptModel, settings.gptApiKey,
-                gptExecuteSystem(info, deps),
+                gptExecuteSystem(info, deps, projectRules),
                 buildExecutePrompt("Fix the test failures in $fileList", plan, fileContents, emptyList()),
                 emptyList(), onToken)
+        }
+        .thenAccept { onComplete(it) }
+        .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
+    }
+
+    // ─── Gap 4: Auto-fix after lint/analyze errors ────────────────────────────
+
+    /**
+     * Called by ChatToolWindowContent after auto-verify finds errors.
+     * Sends lint/analyze output through a targeted fix chain.
+     */
+    fun fixLintErrors(
+        lintOutput: String,
+        project: Project,
+        onStatus: (String) -> Unit,
+        onToken: (String) -> Unit,
+        onComplete: (String) -> Unit
+    ) {
+        stopRequested = false
+        val settings = AppSettingsState.instance
+        val info = ProjectTypeDetector.detect(project)
+        val deps = ProjectDependencyAnalyzer.analyze(project)
+        val projectRules = readProjectRules(project)
+
+        // Extract just the error lines to keep context small
+        val errorLines = lintOutput.lines()
+            .filter { it.contains("error", ignoreCase = true) || it.contains("warning", ignoreCase = true) }
+            .take(40)
+            .joinToString("\n")
+
+        if (errorLines.isBlank()) { onComplete(""); return }
+
+        // Parse file paths from error output to fetch relevant files
+        val errorPaths = Regex("""(?:lib|app|src|android|ios|test)/[\w/\-]+\.(?:dart|kt|java|xml)""")
+            .findAll(lintOutput)
+            .map { it.value.trim() }
+            .distinct()
+            .take(6)
+            .toList()
+
+        onStatus("Reading error files...")
+        val fileContents = fetchRequestedFiles(project, errorPaths)
+
+        onStatus("Fixing lint errors...")
+        callModelBlocking(settings.kimiModel, settings.kimiApiKey,
+            kimiPlannerSystem(info, deps, projectRules),
+            """
+            ═══ SITUATION ═══
+            Post-apply lint/analyze errors. Need to fix all of them.
+
+            ACTION: FIX_BUG
+            FILES_NEEDED: ${errorPaths.joinToString(", ")}
+            SEARCH_QUERIES: NONE
+
+            ═══ ERROR FILES ═══
+            $fileContents
+
+            ═══ LINT OUTPUT ═══
+            $errorLines
+
+            Produce a precise plan to fix ALL lint errors shown.
+            """.trimIndent()
+        ).thenCompose { plan ->
+            if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
+            onStatus("Applying lint fixes...")
+            implementWithAgenticRetry(
+                settings, info, deps, projectRules,
+                "Fix lint errors", plan, fileContents, emptyList(), emptyList(),
+                project, onStatus, onToken
+            )
         }
         .thenAccept { onComplete(it) }
         .exceptionally { ex -> onComplete("Error: ${ex.cause?.message ?: ex.message}"); null }
@@ -496,18 +736,37 @@ object AiService {
 
     // ─── Prompt builders ──────────────────────────────────────────────────────
 
-    private fun historyBlock(history: List<Message>) =
-        history.takeLast(10).joinToString("\n\n") { msg ->
-            val label = if (msg.role == "user") "USER" else "ASSISTANT (previously delivered)"
-            "[$label]:\n${msg.content.take(1500)}"
+    /**
+     * Gap 8: Smart history — keeps last 6 turns verbatim; compresses older ones.
+     * Prevents context bloat while preserving recent context accurately.
+     */
+    private fun buildSmartHistory(history: List<Message>): String {
+        if (history.isEmpty()) return ""
+        val verbatimCutoff = 6
+        val recent  = history.takeLast(verbatimCutoff)
+        val older   = history.dropLast(verbatimCutoff)
+
+        val sb = StringBuilder()
+
+        if (older.isNotEmpty()) {
+            sb.append("EARLIER CONVERSATION (${older.size} turns, summarized):\n")
+            older.forEach { msg ->
+                val label = if (msg.role == "user") "USER" else "ASSISTANT"
+                sb.append("  [$label]: ${msg.content.take(120).replace('\n', ' ')}\n")
+            }
+            sb.append("\n")
         }
 
-    /**
-     * Kimi's planner prompt: history + current editor context + project file listing + request.
-     * Kimi sees the full picture and decides what else it needs.
-     */
+        recent.forEach { msg ->
+            val label = if (msg.role == "user") "USER" else "ASSISTANT (previously delivered)"
+            sb.append("[$label]:\n${msg.content.take(2000)}\n\n")
+        }
+
+        return sb.toString().trimEnd()
+    }
+
     private fun buildPlannerPrompt(msg: String, history: List<Message>, editorCtx: String, projectListing: String) = buildString {
-        val h = historyBlock(history)
+        val h = buildSmartHistory(history)
         if (h.isNotEmpty()) append("═══ CONVERSATION HISTORY ═══\n$h\n\n")
         editorCtx.takeIf { it.isNotBlank() }?.let { append("═══ ACTIVE EDITOR CONTEXT ═══\n$it\n\n") }
         projectListing.takeIf { it.isNotBlank() }?.let { append("═══ PROJECT FILE LISTING ═══\n$it\n\n") }
@@ -516,27 +775,60 @@ object AiService {
     }
 
     /**
-     * Gemini's review prompt: Kimi's plan + full fetched context + history.
+     * Gap 7: Gemini verification prompt — focused on checking file coverage and quoting edit locations.
      */
-    private fun buildGeminiPrompt(msg: String, kimiPlan: String, fullCtx: String, history: List<Message>) = buildString {
-        val h = historyBlock(history)
+    private fun buildGeminiVerifyPrompt(msg: String, kimiPlan: String, fullCtx: String, history: List<Message>) = buildString {
+        val h = buildSmartHistory(history)
         if (h.isNotEmpty()) append("═══ CONVERSATION HISTORY ═══\n$h\n\n")
-        fullCtx.takeIf { it.isNotBlank() }?.let { append("═══ FETCHED CONTEXT (files + search) ═══\n$it\n\n") }
+        fullCtx.takeIf { it.isNotBlank() }?.let { append("═══ FETCHED FILES & SEARCH RESULTS ═══\n$it\n\n") }
         append("═══ KIMI'S PLAN ═══\n$kimiPlan\n\n")
         append("═══ CURRENT REQUEST ═══\n$msg\n\n")
-        append("Validate and improve Kimi's plan using the fetched file contents and search results above.")
+        append("""
+            Verify this plan against the fetched file contents above.
+            1. List any MISSING_FILES (files the plan edits that are NOT in the fetched context above).
+            2. For each planned edit, find and quote the exact EDIT_ANCHOR from the fetched file.
+            3. Check API correctness and flag anything missing.
+        """.trimIndent())
+    }
+
+    private fun buildExecutePrompt(msg: String, plan: String, fullCtx: String, history: List<Message>) = buildString {
+        val h = buildSmartHistory(history)
+        if (h.isNotEmpty()) append("═══ CONVERSATION HISTORY ═══\n$h\n\n")
+        fullCtx.takeIf { it.isNotBlank() }?.let { append("═══ PROJECT CONTEXT ═══\n$it\n\n") }
+        append("═══ VERIFIED PLAN (with EDIT_ANCHOR quotes) ═══\n$plan\n\n")
+        append("═══ CURRENT REQUEST ═══\n$msg\n\n")
+        append("Execute the plan completely. Use the EDIT_ANCHOR quotes for all <search> blocks. Start now.")
     }
 
     /**
-     * GPT's execution prompt: validated plan + full context + history + request.
+     * Gap 1 (Agentic retry): GPT's previous output had <search> blocks that didn't match real files.
+     * Inject the actual file content and ask GPT to regenerate only the failing blocks.
      */
-    private fun buildExecutePrompt(msg: String, plan: String, fullCtx: String, history: List<Message>) = buildString {
-        val h = historyBlock(history)
+    private fun buildSearchRetryPrompt(
+        msg: String, plan: String, fullCtx: String, history: List<Message>,
+        previousOutput: String, failures: List<SearchFailure>
+    ) = buildString {
+        val h = buildSmartHistory(history)
         if (h.isNotEmpty()) append("═══ CONVERSATION HISTORY ═══\n$h\n\n")
         fullCtx.takeIf { it.isNotBlank() }?.let { append("═══ PROJECT CONTEXT ═══\n$it\n\n") }
-        append("═══ VALIDATED PLAN ═══\n$plan\n\n")
+        append("═══ VERIFIED PLAN ═══\n$plan\n\n")
         append("═══ CURRENT REQUEST ═══\n$msg\n\n")
-        append("Execute the plan completely. Follow the ACTION field. Output every file in <new_file> or <file_change> tags with COMPLETE contents. Start now.")
+        append("═══ PREVIOUS RESPONSE (partial — had search failures) ═══\n")
+        append(previousOutput.take(2000))
+        append("\n\n")
+        append("═══ SEARCH BLOCK FAILURES — ACTUAL FILE CONTENTS ═══\n")
+        failures.forEach { failure ->
+            append("FAILED path=\"${failure.path}\":\n")
+            append("Your <search> block was:\n```\n${failure.searchBlock.take(500)}\n```\n\n")
+            append("ACTUAL file content:\n```\n${failure.actualContent.take(4000)}\n```\n\n")
+        }
+        append("""
+            Some of your <search> blocks did not match the real file content.
+            The actual file content is shown above for each failure.
+
+            Regenerate the ENTIRE response (all file tags), this time copying the <search> blocks
+            VERBATIM from the actual file content shown above.
+        """.trimIndent())
     }
 
     // ─── Model callers ────────────────────────────────────────────────────────

@@ -177,6 +177,8 @@ class ChatToolWindowContent(private val project: Project) {
             try {
                 writeFile(path, content, isNew, search)
                 pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
+                // Gap 4: auto-verify after every single-file apply
+                SwingUtilities.invokeLater { autoVerify(listOf(path)) }
             } catch (e: Exception) {
                 pushRaw("""{"type":"apply_err","path":${gson.toJson(path)},"msg":${gson.toJson(e.message)}}""")
             }
@@ -202,7 +204,44 @@ class ChatToolWindowContent(private val project: Project) {
                 }
             }
         }
-        if (applied.isNotEmpty()) SwingUtilities.invokeLater { startTestLoop(applied, 1) }
+        // Gap 4: auto-verify runs analyze/lint immediately after batch apply
+        if (applied.isNotEmpty()) SwingUtilities.invokeLater { autoVerify(applied) }
+    }
+
+    /**
+     * Gap 4: Auto-verify — run flutter analyze / lint after every apply.
+     * Streams output to terminal. If errors found, triggers AI auto-fix via fixLintErrors.
+     */
+    private fun autoVerify(changedPaths: List<String>) {
+        push("status", "Verifying changes...")
+        js("""App.openTerminal("Auto-verify...")""")
+        val exec = if (isFlutter)
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit ->
+                TerminalExecutor.flutterAnalyze(project, onLine, onDone) }
+        else
+            { onLine: (String)->Unit, onDone: (TerminalExecutor.CommandResult)->Unit ->
+                TerminalExecutor.runLint(project, onLine, onDone) }
+        runCmd(exec) { ok, out ->
+            if (ok) {
+                push("status", "All checks pass ✓")
+                js("""App.sysLine("✅ Auto-verify passed")""")
+                // Also run tests after successful verify
+                startTestLoop(changedPaths, 1)
+            } else {
+                js("""App.sysLine("⚠️ Issues found — AI fixing..."); App.startStream()""")
+                history.add(Message("user", "[auto-verify] Fix lint/analyze errors after apply"))
+                AiService.fixLintErrors(
+                    lintOutput  = out,
+                    project     = project,
+                    onStatus    = { s   -> push("status", s) },
+                    onToken     = { tok -> push("token", tok) },
+                    onComplete  = { full ->
+                        history.add(Message("assistant", full))
+                        push("complete", full)
+                    }
+                )
+            }
+        }
     }
 
     private fun writeFile(path: String, content: String, isNew: Boolean, search: String? = null) {
@@ -326,9 +365,9 @@ class ChatToolWindowContent(private val project: Project) {
                             val fixes = parseChanges(full)
                             if (fixes.isEmpty()) { js("""App.sysLine("⚠️ No fix returned.")"""); return@fixTestFailures }
                             WriteCommandAction.runWriteCommandAction(project) {
-                                fixes.forEach { (p, c, n) -> try { writeFile(p, c, n) } catch (_: Exception) {} }
+                                fixes.forEach { fc -> try { writeFile(fc.path, fc.content, fc.isNew, fc.search) } catch (_: Exception) {} }
                             }
-                            startTestLoop((changed + fixes.map { it.first }).distinct(), attempt + 1)
+                            startTestLoop((changed + fixes.map { it.path }).distinct(), attempt + 1)
                         }
                     )
                 }
@@ -413,14 +452,26 @@ class ChatToolWindowContent(private val project: Project) {
 
     private fun js(script: String) = browser?.cefBrowser?.executeJavaScript(script, "", 0)
 
-    // File change parsing
-    private data class FC(val first: String, val second: String, val third: Boolean)
+    // File change parsing — supports <search>/<replace> surgical edits
+    private data class FC(val path: String, val content: String, val isNew: Boolean, val search: String? = null)
+
     private fun parseChanges(r: String): List<FC> {
         val list = mutableListOf<FC>()
         Regex("""<file_change\s+path="([^"]+)">([\s\S]*?)</file_change>""").findAll(r)
-            .forEach { list.add(FC(it.groupValues[1].trim(), it.groupValues[2].trim(), false)) }
+            .forEach { m ->
+                val path = m.groupValues[1].trim()
+                val body = m.groupValues[2]
+                val sm = Regex("""<search>([\s\S]*?)</search>""").find(body)
+                val rm = Regex("""<replace>([\s\S]*?)</replace>""").find(body)
+                if (sm != null && rm != null) {
+                    list.add(FC(path, rm.groupValues[1].trim(), false, sm.groupValues[1].trim()))
+                } else {
+                    // Legacy: no search/replace — treat whole body as content (full overwrite)
+                    list.add(FC(path, body.trim(), false, null))
+                }
+            }
         Regex("""<new_file\s+path="([^"]+)">([\s\S]*?)</new_file>""").findAll(r)
-            .forEach { list.add(FC(it.groupValues[1].trim(), it.groupValues[2].trim(), true)) }
+            .forEach { m -> list.add(FC(m.groupValues[1].trim(), m.groupValues[2].trim(), true, null)) }
         return list
     }
 

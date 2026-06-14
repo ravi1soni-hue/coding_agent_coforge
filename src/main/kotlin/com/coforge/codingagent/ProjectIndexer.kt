@@ -77,17 +77,18 @@ object ProjectIndexer {
         val all = index(project)
         if (all.isEmpty() || query.isBlank()) return emptyList()
 
-        val words = tokenize(query)
-        if (words.isEmpty()) return emptyList()
+        val baseWords = tokenize(query)
+        if (baseWords.isEmpty()) return emptyList()
+        // Gap 3: expand with semantic concept synonyms
+        val words = expandWithConcepts(baseWords)
 
         return all
-            .map { entry -> entry to scoreEntry(entry, words) }
+            .map { entry -> entry to scoreEntry(entry, words, baseWords) }
             .filter { (_, s) -> s > 0 }
             .sortedByDescending { (_, s) -> s }
             .take(topN)
             .map { (entry, _) ->
-                // Trim content to most relevant section before returning
-                entry.copy(content = extractRelevantSection(entry.content, words, SNIPPET_LINES))
+                entry.copy(content = extractRelevantSection(entry.content, baseWords, SNIPPET_LINES))
             }
     }
 
@@ -102,36 +103,43 @@ object ProjectIndexer {
 
     // ─── Scoring ──────────────────────────────────────────────────────────────
 
-    private fun scoreEntry(entry: FileEntry, words: Set<String>): Int {
+    /**
+     * Gap 3: Semantic scoring. Uses concept-expanded words for broader recall,
+     * but applies a higher weight when original (non-expanded) words match.
+     * This gives exact matches priority while still surfacing semantically related files.
+     */
+    private fun scoreEntry(entry: FileEntry, expandedWords: Set<String>, baseWords: Set<String> = expandedWords): Int {
         var score = 0
-        val fileName = entry.relativePath.substringAfterLast("/").lowercase()
+        val fileName  = entry.relativePath.substringAfterLast("/").lowercase()
         val pathLower = entry.relativePath.lowercase()
 
-        // File name match — highest weight (exact name segment)
-        words.forEach { w ->
+        // File name match — highest weight; bonus for exact (non-concept-expanded) words
+        expandedWords.forEach { w ->
+            val isBase = w in baseWords
             when {
-                fileName.contains(w) -> score += 10
-                pathLower.contains(w) -> score += 4
+                fileName.contains(w) -> score += if (isBase) 12 else 5
+                pathLower.contains(w) -> score += if (isBase) 5 else 2
             }
         }
 
         // Symbol (class/function) name match — very high weight
         val symsLower = entry.symbols.map { it.lowercase() }
-        words.forEach { w ->
+        expandedWords.forEach { w ->
+            val isBase = w in baseWords
             symsLower.forEach { sym ->
                 when {
-                    sym == w        -> score += 12
-                    sym.contains(w) -> score += 5
-                    w.contains(sym) && sym.length > 3 -> score += 3
+                    sym == w               -> score += if (isBase) 14 else 6
+                    sym.contains(w)        -> score += if (isBase) 6 else 3
+                    w.contains(sym) && sym.length > 3 -> score += 2
                 }
             }
         }
 
-        // Content keyword match — lower weight, capped to avoid huge files dominating
+        // Content keyword match — capped to avoid huge files dominating
         val contentLower = entry.content.lowercase()
         var hits = 0
-        words.forEach { w -> if (contentLower.contains(w)) hits++ }
-        score += minOf(hits * 2, 10)
+        expandedWords.forEach { w -> if (contentLower.contains(w)) hits++ }
+        score += minOf(hits * 2, 12)
 
         return score
     }
@@ -214,10 +222,60 @@ object ProjectIndexer {
     )
 
     private fun tokenize(text: String): Set<String> =
-        // Also split camelCase: "UserRepository" → "user", "repository"
+        // Split camelCase: "UserRepository" → "user", "repository"
         text.replace(Regex("([a-z])([A-Z])"), "$1 $2")
             .lowercase()
             .split(Regex("[^a-zA-Z0-9_]+"))
             .filter { it.length > 2 && it !in STOP_WORDS }
             .toSet()
+
+    // ─── Gap 3: Semantic concept groups (replaces pure TF-IDF) ───────────────
+    //
+    // When a query word belongs to a concept group, also score against all synonyms
+    // in that group. Dramatically improves recall for common mobile dev concepts
+    // (e.g. querying "login" also matches files containing "authenticate", "session").
+
+    private val CONCEPT_GROUPS: List<Set<String>> = listOf(
+        setOf("auth", "login", "logout", "signin", "signup", "password", "token", "jwt",
+              "credential", "session", "authenticate", "authorization", "permissions"),
+        setOf("network", "http", "api", "rest", "request", "response", "endpoint",
+              "retrofit", "dio", "fetch", "url", "client", "interceptor", "header"),
+        setOf("database", "db", "sql", "query", "table", "record", "store", "persist",
+              "cache", "room", "realm", "sqlite", "hive", "shared", "preferences", "prefs"),
+        setOf("navigation", "route", "screen", "page", "navigate", "push", "pop", "gorouter",
+              "navhost", "fragment", "activity", "intent", "deeplink", "stack"),
+        setOf("state", "viewmodel", "bloc", "provider", "riverpod", "getx", "redux",
+              "store", "reducer", "cubit", "notifier", "statenotifier", "changenotifier"),
+        setOf("ui", "widget", "composable", "view", "layout", "component", "button",
+              "text", "image", "icon", "color", "theme", "style", "padding", "margin"),
+        setOf("payment", "cart", "checkout", "order", "price", "product", "item",
+              "stripe", "invoice", "billing", "subscription", "purchase"),
+        setOf("user", "profile", "account", "customer", "member", "person",
+              "identity", "avatar", "username", "email", "phone"),
+        setOf("list", "recycler", "listview", "lazy", "scroll", "adapter", "items",
+              "gridview", "flatlist", "listview", "virtualized"),
+        setOf("error", "exception", "crash", "bug", "fail", "failure", "catch",
+              "throw", "stacktrace", "debug", "log", "trace"),
+        setOf("image", "photo", "picture", "bitmap", "drawable", "icon", "asset",
+              "glide", "coil", "picasso", "imageview", "imageloader"),
+        setOf("notification", "push", "fcm", "firebase", "alert", "banner",
+              "message", "channel", "broadcast", "alarm"),
+        setOf("test", "unit", "integration", "mock", "stub", "verify", "assert",
+              "expect", "when", "given", "should", "spec"),
+        setOf("permission", "grant", "deny", "request", "camera", "location",
+              "storage", "microphone", "runtime", "manifest"),
+        setOf("async", "coroutine", "suspend", "flow", "future", "promise",
+              "callback", "rxjava", "observable", "single", "maybe", "completable"),
+    )
+
+    /** Expand a set of query words with semantic synonyms from concept groups. */
+    private fun expandWithConcepts(words: Set<String>): Set<String> {
+        val expanded = words.toMutableSet()
+        words.forEach { word ->
+            CONCEPT_GROUPS.forEach { group ->
+                if (word in group) expanded.addAll(group)
+            }
+        }
+        return expanded
+    }
 }
