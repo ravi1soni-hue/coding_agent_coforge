@@ -363,7 +363,10 @@ object AiService {
                     ).joinToString("\n\n===\n\n")
                     plan to fullCtx
                 }
-        }.thenCompose { (plan, fullCtx) ->
+        }.thenCompose { planAndCtx ->
+            val plan    = planAndCtx.first
+            val fullCtx = planAndCtx.second
+
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture(plan.rawText to fullCtx)
 
             // Skip Gemini for pure explanations — no file edits involved
@@ -396,7 +399,10 @@ object AiService {
                     }
                 }
             }
-        }.thenCompose { (verifiedPlan, fullCtx) ->
+        }.thenCompose { verifiedAndCtx ->
+            val verifiedPlan = verifiedAndCtx.first
+            val fullCtx      = verifiedAndCtx.second
+
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
 
             // ── Step 4: GPT implements, with agentic retry on search failures ─
