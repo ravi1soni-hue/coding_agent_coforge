@@ -7,621 +7,1145 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0d0d0f;--bg1:#141416;--bg2:#1c1c1f;--bg3:#242428;
-  --border:#2e2e33;--border2:#3a3a40;
-  --text:#e8e8ea;--text2:#9494a0;--text3:#55555f;
-  --accent:#c97c5d;--accent2:#4a9eff;--green:#3fb950;--red:#f85149;--purple:#bc8cff;
-  --code-bg:#0a0a0c;--user-bg:#1e1e22;
-  --r:12px;--rs:6px;
-  --font:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;
-  --mono:'JetBrains Mono','Fira Code','Cascadia Code',monospace;
-  --shadow:0 8px 32px rgba(0,0,0,.5)
+  --bg:#0d0d0f;
+  --bg1:#141416;
+  --bg2:#1a1a1e;
+  --bg3:#222226;
+  --bg4:#2a2a2e;
+  --border:#2a2a2f;
+  --border2:#38383f;
+  --text:#e2e2e6;
+  --text2:#8e8e9a;
+  --text3:#4e4e58;
+  --accent:#c97c5d;
+  --accent-dim:rgba(201,124,93,.12);
+  --accent2:#4a9eff;
+  --green:#3fb950;
+  --red:#f85149;
+  --yellow:#e3b341;
+  --purple:#bc8cff;
+  --think:#a78bfa;
+  --code-bg:#0a0a0c;
+  --user-bg:#1d1d21;
+  --r:14px;--rs:8px;--rx:4px;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono','Fira Code','Cascadia Code','Consolas',monospace;
+  --shadow:0 12px 40px rgba(0,0,0,.6);
+  --shadow-sm:0 4px 16px rgba(0,0,0,.4)
 }
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.6;overflow:hidden;-webkit-font-smoothing:antialiased}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.6;overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 
-/* ── Layout ── */
-#app{display:flex;flex-direction:column;height:100vh}
+/* ── App shell ── */
+#app{display:flex;flex-direction:column;height:100vh;max-height:100vh}
 
 /* ── Header ── */
-#hdr{display:flex;align-items:center;justify-content:space-between;padding:0 14px;height:44px;min-height:44px;background:var(--bg1);border-bottom:1px solid var(--border);flex-shrink:0}
-.hdr-l{display:flex;align-items:center;gap:10px}
-.avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#c97c5d,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;color:#fff;flex-shrink:0}
-.hdr-name{font-weight:700;font-size:13px}
-#model-bar{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text3)}
-.mdot{width:5px;height:5px;border-radius:50%;background:var(--text3);transition:background .3s,box-shadow .3s}
-.mdot.on{background:var(--green);box-shadow:0 0 5px var(--green)}
-.hdr-r{display:flex;gap:2px}
-.ibtn{width:30px;height:30px;border-radius:var(--rs);border:none;background:none;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:background .15s,color .15s}
-.ibtn:hover{background:var(--bg2);color:var(--text)}
+#hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 12px;height:42px;min-height:42px;
+  background:var(--bg1);border-bottom:1px solid var(--border);
+  flex-shrink:0;user-select:none
+}
+.hdr-l{display:flex;align-items:center;gap:9px}
+.logo{
+  width:24px;height:24px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,#c97c5d 0%,#7c3aed 100%);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:11px;color:#fff;letter-spacing:-.5px
+}
+.hdr-brand{font-size:13px;font-weight:700;color:var(--text);letter-spacing:-.2px}
+#chain{
+  display:flex;align-items:center;gap:4px;
+  font-size:10px;color:var(--text3);letter-spacing:.02em;
+  border-left:1px solid var(--border);padding-left:9px;margin-left:2px
+}
+.cdot{
+  width:5px;height:5px;border-radius:50%;background:var(--text3);
+  transition:background .25s,box-shadow .25s;flex-shrink:0
+}
+.cdot.active{background:var(--green);box-shadow:0 0 6px var(--green)}
+.csep{color:var(--border2);margin:0 1px}
+.hdr-r{display:flex;gap:1px}
+.hbtn{
+  width:28px;height:28px;border-radius:var(--rx);border:none;
+  background:none;color:var(--text3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;transition:background .12s,color .12s
+}
+.hbtn:hover{background:var(--bg3);color:var(--text)}
+.hbtn svg{pointer-events:none}
 
-/* ── Chat ── */
-#chat{flex:1;display:flex;flex-direction:column;overflow:hidden}
-#msgs{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px 0 12px;scroll-behavior:smooth}
-#msgs::-webkit-scrollbar{width:4px}
-#msgs::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:2px}
-.msg-wrap{max-width:760px;margin:0 auto;padding:0 20px;width:100%}
+/* ── Chat area ── */
+#chat{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
 
-/* User message */
-.msg-user{display:flex;justify-content:flex-end;margin-bottom:16px;animation:fadeUp .2s ease}
-.user-bub{background:var(--user-bg);border:1px solid var(--border);border-radius:var(--r) var(--r) 4px var(--r);padding:10px 14px;max-width:78%;color:var(--text);word-break:break-word;font-size:14px;line-height:1.65;user-select:text}
+/* ── Message list ── */
+#msgs{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  padding:24px 0 8px;scroll-behavior:smooth
+}
+#msgs::-webkit-scrollbar{width:3px}
+#msgs::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:2px}
+#msgs::-webkit-scrollbar-thumb:hover{background:var(--border2)}
+.mw{max-width:720px;margin:0 auto;padding:0 18px;width:100%}
 
-/* AI message */
-.msg-ai{margin-bottom:20px;animation:fadeUp .2s ease}
-.ai-meta{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.ai-name{font-size:12px;font-weight:600;color:var(--text2)}
-.ai-body{padding-left:34px;color:var(--text);font-size:14px;line-height:1.7;word-break:break-word;user-select:text}
+/* ── Welcome ── */
+#welcome{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:calc(100vh - 160px);gap:10px;padding:20px;
+  animation:fadeUp .3s ease
+}
+.w-logo{
+  width:56px;height:56px;border-radius:50%;
+  background:linear-gradient(135deg,#c97c5d 0%,#7c3aed 100%);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:900;font-size:24px;color:#fff;
+  box-shadow:0 8px 30px rgba(124,58,237,.3);
+  margin-bottom:4px
+}
+.w-headline{font-size:20px;font-weight:700;letter-spacing:-.3px;color:var(--text)}
+.w-sub{font-size:12px;color:var(--text3);text-align:center;line-height:1.7;max-width:280px}
 
-@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+/* ── User message ── */
+.msg-user{
+  display:flex;justify-content:flex-end;
+  margin-bottom:18px;animation:fadeUp .18s ease
+}
+.user-bub{
+  background:var(--user-bg);border:1px solid var(--border);
+  border-radius:var(--r) var(--r) 4px var(--r);
+  padding:10px 14px;max-width:76%;
+  color:var(--text);word-break:break-word;font-size:14px;
+  line-height:1.65;user-select:text;white-space:pre-wrap
+}
+.user-img-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.user-img-thumb{
+  width:64px;height:64px;border-radius:6px;object-fit:cover;
+  border:1px solid var(--border);cursor:pointer;transition:opacity .15s
+}
+.user-img-thumb:hover{opacity:.85}
 
-/* Streaming cursor */
-.streaming .ai-body>.stream-text::after{content:'▋';animation:blink .7s step-start infinite;color:var(--accent);margin-left:1px}
+/* ── AI message ── */
+.msg-ai{margin-bottom:22px;animation:fadeUp .18s ease}
+.ai-meta{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+.ai-av{
+  width:20px;height:20px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,#c97c5d,#7c3aed);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:9px;color:#fff
+}
+.ai-name{font-size:11px;font-weight:600;color:var(--text2)}
+.ai-body{padding-left:27px;color:var(--text);font-size:14px;line-height:1.72;word-break:break-word;user-select:text}
+
+/* ── Streaming ── */
+.stream-cursor::after{
+  content:'▋';color:var(--accent);margin-left:1px;
+  animation:blink .65s step-start infinite
+}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
-/* Reasoning */
-.reasoning{margin-bottom:8px;border:1px solid var(--border);border-radius:var(--rs);overflow:hidden}
-.reasoning-hdr{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg1);cursor:pointer;border:none;width:100%;text-align:left;font-size:11px;color:var(--text3);transition:background .15s}
-.reasoning-hdr:hover{background:var(--bg2)}
-.chev{transition:transform .2s;font-style:normal}
-.reasoning-hdr.open .chev{transform:rotate(90deg)}
-.reasoning-body{display:none;padding:10px 12px;font-family:var(--mono);font-size:10.5px;color:var(--text3);background:var(--bg);max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6}
-.reasoning-body.show{display:block}
+/* ── Thinking block ── */
+.think{
+  margin-bottom:8px;border-radius:var(--rs);overflow:hidden;
+  border:1px solid rgba(167,139,250,.18);
+  background:rgba(167,139,250,.04)
+}
+.think-hdr{
+  display:flex;align-items:center;gap:7px;
+  padding:7px 12px;cursor:pointer;
+  border:none;background:none;width:100%;text-align:left;
+  font-size:11px;color:var(--think);transition:background .12s
+}
+.think-hdr:hover{background:rgba(167,139,250,.06)}
+.think-spin{
+  width:12px;height:12px;border-radius:50%;flex-shrink:0;
+  border:1.5px solid rgba(167,139,250,.3);border-top-color:var(--think);
+  animation:spin .8s linear infinite;display:none
+}
+.think-spin.active{display:block}
+.think-chev{font-size:9px;transition:transform .2s;color:var(--think);margin-left:auto}
+.think-hdr.collapsed .think-chev{transform:rotate(-90deg)}
+.think-dur{font-size:10px;color:var(--text3);margin-left:2px}
+.think-body{
+  max-height:220px;overflow-y:auto;
+  padding:10px 12px 12px;
+  font-family:var(--mono);font-size:11px;
+  color:rgba(167,139,250,.7);line-height:1.65;
+  white-space:pre-wrap;word-break:break-word;
+  background:rgba(0,0,0,.15)
+}
+.think-body.collapsed{display:none}
+.think-body::-webkit-scrollbar{width:2px}
+.think-body::-webkit-scrollbar-thumb{background:rgba(167,139,250,.2)}
 
-/* Message actions */
-.msg-acts{display:flex;gap:2px;padding:6px 0 0 34px;opacity:0;transition:opacity .15s}
-.msg-ai:hover .msg-acts{opacity:1}
-.abtn{padding:3px 8px;border-radius:4px;border:none;background:none;color:var(--text3);cursor:pointer;font-size:11px;font-family:var(--font);transition:all .15s}
-.abtn:hover{background:var(--bg2);color:var(--text)}
+/* ── Typing dots ── */
+#typing{display:none;padding:4px 0 10px;animation:fadeUp .15s ease}
+#typing.show{display:block}
+.typing-inner{display:flex;align-items:center;gap:7px}
+.t-av{
+  width:20px;height:20px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,#c97c5d,#7c3aed);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:9px;color:#fff
+}
+.tdots{display:flex;gap:4px;padding-left:2px}
+.tdot{
+  width:6px;height:6px;border-radius:50%;background:var(--text3);
+  animation:tdbounce 1.3s ease infinite
+}
+.tdot:nth-child(2){animation-delay:.15s}
+.tdot:nth-child(3){animation-delay:.3s}
+@keyframes tdbounce{0%,70%,100%{transform:translateY(0);opacity:.35}35%{transform:translateY(-5px);opacity:1}}
 
-/* Typing indicator */
-#typing{display:none;padding:8px 20px;max-width:760px;margin:0 auto;width:100%}
-#typing.show{display:flex;align-items:center;gap:8px}
-.dots{display:flex;gap:5px}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--text3);animation:bounce 1.2s ease infinite}
-.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
-@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-6px);opacity:1}}
+/* ── Msg actions ── */
+.msg-acts{
+  display:flex;gap:1px;padding:4px 0 0 27px;
+  opacity:0;transition:opacity .15s;pointer-events:none
+}
+.msg-ai:hover .msg-acts{opacity:1;pointer-events:auto}
+.mact{
+  padding:3px 8px;border-radius:var(--rx);border:none;
+  background:none;color:var(--text3);cursor:pointer;
+  font-size:11px;font-family:var(--font);transition:all .12s
+}
+.mact:hover{background:var(--bg3);color:var(--text)}
+.mact.ok{color:var(--green)}
 
-/* Welcome */
-#welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px;padding:20px;animation:fadeUp .3s ease}
-.w-logo{width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#c97c5d,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:32px;color:#fff;box-shadow:0 12px 40px rgba(201,124,93,.25)}
-.w-title{font-size:22px;font-weight:700}
-.w-sub{font-size:12px;color:var(--text3);text-align:center;max-width:320px}
-.chips{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;max-width:400px}
-.chip{display:flex;align-items:center;gap:10px;padding:13px 14px;border-radius:var(--r);background:var(--bg1);border:1px solid var(--border);cursor:pointer;transition:all .15s;text-align:left}
-.chip:hover{background:var(--bg2);border-color:var(--border2);transform:translateY(-1px)}
-.chip-ico{font-size:18px;flex-shrink:0}
-.chip-t{font-size:12px;font-weight:600;color:var(--text)}
-.chip-s{font-size:11px;color:var(--text3);margin-top:2px}
+/* ── System line ── */
+.sysline{
+  font-size:11px;color:var(--text3);font-style:italic;
+  padding:2px 0 8px;animation:fadeUp .15s
+}
 
 /* ── Markdown ── */
-.md h1{font-size:19px;font-weight:700;margin:14px 0 7px;border-bottom:1px solid var(--border);padding-bottom:6px}
-.md h2{font-size:16px;font-weight:700;margin:12px 0 5px}
-.md h3{font-size:14px;font-weight:600;margin:10px 0 4px}
-.md p{margin:5px 0}
-.md ul,.md ol{padding-left:22px;margin:5px 0}
-.md li{margin:3px 0}
-.md code{font-family:var(--mono);font-size:12px;background:var(--bg2);color:#adbac7;padding:1px 5px;border-radius:3px}
-.md pre{margin:0}/* pre handled by code-block */
-.md blockquote{border-left:3px solid var(--border2);margin:8px 0;padding-left:12px;color:var(--text2)}
-.md hr{border:none;border-top:1px solid var(--border);margin:12px 0}
-.md a{color:var(--accent2);text-decoration:none}.md a:hover{text-decoration:underline}
-.md strong{font-weight:700}.md em{font-style:italic;color:var(--text2)}.md del{text-decoration:line-through;color:var(--text3)}
-.md table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px}
-.md th,.md td{border:1px solid var(--border);padding:6px 10px;text-align:left}
-.md th{background:var(--bg2);font-weight:600}
+.md h1,.md h2,.md h3,.md h4{font-weight:700;line-height:1.3;margin:14px 0 6px}
+.md h1{font-size:18px;border-bottom:1px solid var(--border);padding-bottom:7px;margin-bottom:10px}
+.md h2{font-size:15px}.md h3{font-size:13px}.md h4{font-size:12px;color:var(--text2)}
+.md p{margin:6px 0}
+.md ul,.md ol{padding-left:20px;margin:6px 0}.md li{margin:3px 0}
+.md li::marker{color:var(--text3)}
+.md blockquote{
+  border-left:3px solid var(--border2);margin:8px 0;
+  padding:4px 12px;color:var(--text2);
+  background:var(--bg1);border-radius:0 var(--rx) var(--rx) 0
+}
+.md hr{border:none;border-top:1px solid var(--border);margin:14px 0}
+.md a{color:var(--accent2);text-decoration:none;border-bottom:1px solid rgba(74,158,255,.3)}
+.md a:hover{border-bottom-color:var(--accent2)}
+.md strong{font-weight:700;color:var(--text)}
+.md em{font-style:italic;color:var(--text2)}
+.md del{text-decoration:line-through;color:var(--text3);opacity:.7}
+.md code{
+  font-family:var(--mono);font-size:12px;
+  background:var(--bg3);color:#adbac7;
+  padding:1px 5px;border-radius:3px;
+  border:1px solid var(--border)
+}
+.md table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+.md th,.md td{border:1px solid var(--border);padding:6px 10px}
+.md th{background:var(--bg2);font-weight:600;color:var(--text2)}
+.md tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 
 /* ── Code block ── */
-.code-block{margin:10px 0;border-radius:var(--rs);border:1px solid var(--border);overflow:hidden}
-.code-hdr{display:flex;align-items:center;justify-content:space-between;padding:5px 12px;background:var(--bg2);border-bottom:1px solid var(--border)}
-.code-lang{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);letter-spacing:.08em;font-family:var(--mono)}
-.code-copy{font-size:11px;padding:2px 8px;border-radius:4px;border:none;background:var(--bg3);color:var(--text2);cursor:pointer;font-family:var(--font);transition:all .15s}
-.code-copy:hover{background:var(--border2);color:var(--text)}.code-copy.ok{color:var(--green)}
-pre.code-pre{background:var(--code-bg);padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.65;color:#c9d1d9;margin:0}
-pre.code-pre::-webkit-scrollbar{height:4px}
-pre.code-pre::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:2px}
+.cb{margin:10px 0;border-radius:var(--rs);border:1px solid var(--border);overflow:hidden}
+.cb-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 12px;background:var(--bg2);border-bottom:1px solid var(--border)
+}
+.cb-lang{
+  font-size:10px;font-weight:700;text-transform:uppercase;
+  color:var(--text3);letter-spacing:.08em;font-family:var(--mono)
+}
+.cb-copy{
+  font-size:11px;padding:2px 9px;border-radius:var(--rx);
+  border:1px solid var(--border);background:var(--bg3);color:var(--text2);
+  cursor:pointer;font-family:var(--font);transition:all .12s
+}
+.cb-copy:hover{border-color:var(--border2);color:var(--text);background:var(--bg4)}
+.cb-copy.ok{color:var(--green);border-color:rgba(63,185,80,.4)}
+pre.cb-pre{
+  background:var(--code-bg);padding:14px 16px;
+  overflow-x:auto;font-family:var(--mono);font-size:12.5px;
+  line-height:1.65;color:#c9d1d9;margin:0;tab-size:2
+}
+pre.cb-pre::-webkit-scrollbar{height:3px}
+pre.cb-pre::-webkit-scrollbar-thumb{background:var(--bg3)}
+/* syntax */
+.kw{color:#ff7b72}.str{color:#a5d6ff}.num{color:#79c0ff}
+.cm{color:#8b949e;font-style:italic}.fn{color:#d2a8ff}
+.cls{color:#ffa657}.ann{color:#e3b341}.rx{color:#a5d6ff}
 
-/* Syntax */
-.kw{color:#ff7b72}.str{color:#a5d6ff}.num{color:#79c0ff}.cm{color:#8b949e;font-style:italic}.fn{color:#d2a8ff}.cls{color:#ffa657}.ann{color:#ffa657}
-
-/* ── File change ── */
-.fc{margin:8px 0;border-radius:var(--rs);border:1px solid var(--border);overflow:hidden;background:var(--bg1)}
-.fc-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg2)}
+/* ── File change proposal ── */
+.fc{margin:8px 0;border-radius:var(--rs);border:1px solid var(--border);overflow:hidden}
+.fc-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 12px;background:var(--bg2)
+}
 .fc-l{display:flex;align-items:center;gap:8px}
-.badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;letter-spacing:.06em;text-transform:uppercase}
-.badge-new{background:rgba(63,185,80,.15);color:var(--green)}
-.badge-edit{background:rgba(74,158,255,.15);color:var(--accent2)}
-.badge-ok{background:rgba(63,185,80,.2);color:var(--green)}
-.fc-path{font-family:var(--mono);font-size:12px;color:var(--text)}
-.fc-btns{display:flex;gap:5px;align-items:center}
-.fc-btn{padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:11px;font-family:var(--font);font-weight:600;transition:all .15s}
-.fc-skip{background:none;color:var(--text3)}.fc-skip:hover{color:var(--text)}
-.fc-apply{background:rgba(63,185,80,.12);color:var(--green);border:1px solid rgba(63,185,80,.25)}.fc-apply:hover{background:rgba(63,185,80,.22)}
-.fc-apply.done{opacity:.5;cursor:default;pointer-events:none}
+.badge{
+  font-size:9px;font-weight:800;padding:2px 6px;
+  border-radius:3px;letter-spacing:.06em;text-transform:uppercase;flex-shrink:0
+}
+.b-new{background:rgba(63,185,80,.12);color:var(--green);border:1px solid rgba(63,185,80,.2)}
+.b-edit{background:rgba(74,158,255,.1);color:var(--accent2);border:1px solid rgba(74,158,255,.2)}
+.b-done{background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.3)}
+.fc-path{font-family:var(--mono);font-size:11.5px;color:var(--text);word-break:break-all}
+.fc-btns{display:flex;gap:5px;flex-shrink:0}
+.fcbtn{
+  padding:4px 10px;border-radius:var(--rx);border:none;
+  cursor:pointer;font-size:11px;font-family:var(--font);
+  font-weight:600;transition:all .12s
+}
+.fcbtn-skip{background:none;color:var(--text3)}.fcbtn-skip:hover{color:var(--text);background:var(--bg3)}
+.fcbtn-apply{
+  background:rgba(63,185,80,.1);color:var(--green);
+  border:1px solid rgba(63,185,80,.22)
+}
+.fcbtn-apply:hover{background:rgba(63,185,80,.2)}
+.fcbtn-apply.done{opacity:.45;cursor:default;pointer-events:none}
 
-/* Apply all */
-.apply-bar{display:flex;align-items:center;justify-content:space-between;margin:12px 0;padding:12px 14px;border-radius:var(--rs);background:var(--bg1);border:1px solid var(--border)}
-.apply-bar span{font-size:12px;color:var(--text2)}
-.apply-all-btn{padding:7px 16px;border-radius:var(--rs);border:none;background:var(--green);color:#000;font-weight:700;font-size:12px;cursor:pointer;transition:opacity .15s}
+/* Apply-all bar */
+.apply-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  margin:12px 0;padding:11px 14px;
+  border-radius:var(--rs);background:var(--bg1);
+  border:1px solid var(--border)
+}
+.apply-bar-l{font-size:12px;color:var(--text2)}
+.apply-bar-l strong{color:var(--text)}
+.apply-all-btn{
+  padding:6px 14px;border-radius:var(--rx);border:none;
+  background:var(--green);color:#000;font-weight:700;font-size:12px;
+  cursor:pointer;font-family:var(--font);transition:opacity .12s
+}
 .apply-all-btn:hover{opacity:.85}
 
-/* ── Terminal ── */
-#term{border-top:1px solid var(--border);background:#090c09;flex-shrink:0;max-height:0;overflow:hidden;transition:max-height .25s ease}
-#term.open{max-height:220px;display:flex;flex-direction:column}
-.term-hdr{display:flex;align-items:center;justify-content:space-between;padding:5px 12px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--border);flex-shrink:0}
-.term-title{font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.08em}
-.term-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px}.term-close:hover{color:var(--text)}
-#term-out{flex:1;overflow-y:auto;padding:10px 14px;font-family:var(--mono);font-size:11px;line-height:1.7;color:#98c379;white-space:pre-wrap;word-break:break-all}
-#term-out::-webkit-scrollbar{width:3px}
-#term-out::-webkit-scrollbar-thumb{background:var(--bg3)}
-.t-err{color:#e06c75}.t-warn{color:#e5c07b}.t-ok{color:#98c379}
+/* ── Terminal drawer ── */
+#term{
+  flex-shrink:0;background:#080b08;
+  border-top:1px solid var(--border);
+  max-height:0;overflow:hidden;
+  transition:max-height .22s cubic-bezier(.4,0,.2,1)
+}
+#term.open{max-height:200px;display:flex;flex-direction:column}
+.term-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 12px;background:rgba(255,255,255,.025);
+  border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0
+}
+.term-label{
+  display:flex;align-items:center;gap:6px;
+  font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--text3)
+}
+.term-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:var(--green);box-shadow:0 0 5px var(--green)
+}
+.term-dot.err{background:var(--red);box-shadow:0 0 5px var(--red)}
+.term-x{
+  background:none;border:none;color:var(--text3);
+  cursor:pointer;font-size:13px;padding:2px;
+  transition:color .12s;line-height:1
+}
+.term-x:hover{color:var(--text)}
+#term-out{
+  flex:1;overflow-y:auto;padding:9px 14px;
+  font-family:var(--mono);font-size:11px;line-height:1.7;
+  color:#98c379;white-space:pre-wrap;word-break:break-all
+}
+#term-out::-webkit-scrollbar{width:2px}
+#term-out::-webkit-scrollbar-thumb{background:var(--bg4)}
+.te{color:#e06c75}.tw{color:#e5c07b}.tok{color:#98c379}.ti{color:#61afef}
 
-/* ── Input ── */
-#footer{flex-shrink:0;padding:8px 14px 12px;background:var(--bg)}
-#input-box{border:1px solid var(--border);border-radius:var(--r);background:var(--bg1);transition:border-color .2s,box-shadow .2s}
-#input-box:focus-within{border-color:rgba(201,124,93,.4);box-shadow:0 0 0 3px rgba(201,124,93,.07)}
-#attach-bar{display:none;padding:8px 12px 0;gap:6px;flex-wrap:wrap}
-#attach-bar.has{display:flex}
-.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px 2px 6px;border-radius:20px;background:rgba(74,158,255,.1);border:1px solid rgba(74,158,255,.22);font-size:11px;color:var(--accent2);white-space:nowrap;animation:fadeUp .15s}
-.pill-x{background:none;border:none;cursor:pointer;color:inherit;font-size:13px;line-height:1;opacity:.6}.pill-x:hover{opacity:1}
-.img-pill{background:rgba(188,140,255,.1);border-color:rgba(188,140,255,.22);color:var(--purple)}
-.img-th{width:20px;height:20px;border-radius:3px;object-fit:cover;vertical-align:middle}
-#file-pop{display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rs);max-height:200px;overflow-y:auto;z-index:100;box-shadow:var(--shadow)}
-#file-pop.open{display:block}
-.fitem{padding:7px 12px;cursor:pointer;font-size:12px;font-family:var(--mono);color:var(--text2);transition:background .1s}
-.fitem:hover,.fitem.sel{background:var(--bg3);color:var(--text)}
-#inp-wrap{position:relative}
-#inp{width:100%;padding:12px 14px 4px;background:none;border:none;color:var(--text);font-family:var(--font);font-size:14px;resize:none;outline:none;line-height:1.65;min-height:48px;max-height:180px;overflow-y:auto}
+/* ── Footer / Input ── */
+#footer{flex-shrink:0;padding:6px 12px 10px;background:var(--bg)}
+
+/* Suggestion pills — shown only on welcome */
+#sugg{
+  display:flex;gap:6px;flex-wrap:wrap;
+  padding:0 0 8px;
+  transition:opacity .2s
+}
+#sugg.hidden{display:none}
+.spill{
+  padding:5px 11px;border-radius:20px;
+  border:1px solid var(--border);background:var(--bg1);
+  color:var(--text2);cursor:pointer;font-size:11.5px;
+  font-family:var(--font);white-space:nowrap;
+  transition:all .12s
+}
+.spill:hover{background:var(--bg2);border-color:var(--border2);color:var(--text)}
+
+/* Input box */
+#ibox{
+  border:1px solid var(--border);border-radius:var(--r);
+  background:var(--bg1);
+  transition:border-color .18s,box-shadow .18s
+}
+#ibox:focus-within{
+  border-color:rgba(201,124,93,.45);
+  box-shadow:0 0 0 3px rgba(201,124,93,.08)
+}
+
+/* Attach pills */
+#abar{display:none;padding:8px 12px 0;gap:5px;flex-wrap:wrap}
+#abar.has{display:flex}
+.ap{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:2px 7px 2px 6px;border-radius:20px;
+  background:rgba(74,158,255,.09);border:1px solid rgba(74,158,255,.2);
+  font-size:11px;color:var(--accent2);white-space:nowrap;
+  animation:fadeUp .12s
+}
+.ap-img{background:rgba(188,140,255,.09);border-color:rgba(188,140,255,.2);color:var(--purple)}
+.ap-th{width:18px;height:18px;border-radius:3px;object-fit:cover;vertical-align:middle}
+.ap-x{background:none;border:none;cursor:pointer;color:inherit;font-size:12px;line-height:1;opacity:.55;padding:0 1px}
+.ap-x:hover{opacity:1}
+
+/* File autocomplete */
+#fpop{
+  display:none;position:absolute;
+  bottom:calc(100% + 5px);left:0;right:0;
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--rs);max-height:190px;overflow-y:auto;
+  z-index:100;box-shadow:var(--shadow);
+  animation:fadeUp .1s ease
+}
+#fpop.open{display:block}
+#fpop::-webkit-scrollbar{width:2px}
+#fpop::-webkit-scrollbar-thumb{background:var(--bg4)}
+.fi{
+  padding:7px 12px;cursor:pointer;
+  font-size:12px;font-family:var(--mono);color:var(--text2);
+  transition:background .08s;display:flex;align-items:center;gap:8px
+}
+.fi:hover,.fi.sel{background:var(--bg3);color:var(--text)}
+.fi-ico{font-size:10px;color:var(--text3);flex-shrink:0}
+
+/* Textarea */
+#iwrap{position:relative}
+#inp{
+  width:100%;padding:11px 14px 4px;
+  background:none;border:none;color:var(--text);
+  font-family:var(--font);font-size:14px;
+  resize:none;outline:none;line-height:1.65;
+  min-height:46px;max-height:180px;overflow-y:auto
+}
 #inp::placeholder{color:var(--text3)}
 #inp::-webkit-scrollbar{width:3px}
-#toolbar{display:flex;align-items:center;justify-content:space-between;padding:5px 10px 8px}
-.tl{display:flex;align-items:center;gap:4px}
-.tr{display:flex;align-items:center;gap:6px}
-#status{font-size:11px;color:var(--text3);min-width:60px}
-.ibadge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.06em;display:none}
-.tsep{width:1px;height:14px;background:var(--border);margin:0 2px}
-.chip{padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--text3);cursor:pointer;font-size:11px;font-family:var(--font);transition:all .15s}
-.chip:hover{background:var(--bg2);color:var(--text);border-color:var(--border2)}
-.att-btn{background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:2px 4px;transition:color .15s}
-.att-btn:hover{color:var(--text)}
-#stop{display:none;padding:4px 10px;border-radius:4px;border:1px solid rgba(248,81,73,.3);background:rgba(248,81,73,.1);color:var(--red);cursor:pointer;font-size:11px;font-family:var(--font);font-weight:600}
-#stop.show{display:flex;align-items:center;gap:4px}
-#send{width:30px;height:30px;border-radius:50%;border:none;background:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0}
-#send:hover{filter:brightness(1.12);transform:scale(1.06)}
-#send:disabled{background:var(--bg3);cursor:default;transform:none;filter:none}
+#inp::-webkit-scrollbar-thumb{background:var(--bg3)}
 
-/* ── Overlay dialogs ── */
-.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:999;align-items:center;justify-content:center}
-.overlay.open{display:flex}
-.dialog{background:var(--bg1);border:1px solid var(--border2);border-radius:var(--r);box-shadow:var(--shadow)}
-.dlg-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border)}
-.dlg-hdr h3{font-size:14px;font-weight:700}
-.dlg-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px}.dlg-close:hover{color:var(--text)}
-.dlg-footer{padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
-.btn-cancel{padding:7px 14px;border-radius:var(--rs);border:1px solid var(--border);background:none;color:var(--text2);cursor:pointer;font-family:var(--font)}
-.btn-ok{padding:7px 14px;border-radius:var(--rs);border:none;background:var(--green);color:#000;font-weight:700;cursor:pointer;font-family:var(--font)}
-/* Apply-all */
-#apply-dlg{width:min(90vw,540px);max-height:70vh;display:flex;flex-direction:column}
-#apply-list{flex:1;overflow-y:auto;padding:8px 16px}
-.apply-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
-.apply-row:last-child{border-bottom:none}
-.apply-row input[type=checkbox]{accent-color:var(--green);width:14px;height:14px;cursor:pointer}
-.apply-row label{flex:1;font-family:var(--mono);font-size:12px;color:var(--text);cursor:pointer}
-/* Sysline */
-.sysline{font-size:11px;color:var(--text3);font-style:italic;padding:3px 0;animation:fadeUp .15s}
+/* Toolbar */
+#tb{display:flex;align-items:center;justify-content:space-between;padding:5px 10px 8px}
+.tb-l{display:flex;align-items:center;gap:3px}
+.tb-r{display:flex;align-items:center;gap:5px}
+#stat{font-size:11px;color:var(--text3);transition:color .2s}
+#stat.active{color:var(--accent)}
+.tsep{width:1px;height:13px;background:var(--border);margin:0 3px}
+
+/* Toolbar buttons */
+.tbtn{
+  padding:3px 8px;border-radius:var(--rx);
+  border:1px solid transparent;background:none;
+  color:var(--text3);cursor:pointer;font-size:11px;
+  font-family:var(--font);transition:all .12s;white-space:nowrap
+}
+.tbtn:hover{background:var(--bg2);border-color:var(--border);color:var(--text)}
+#stop-btn{
+  display:none;padding:3px 9px;border-radius:var(--rx);
+  border:1px solid rgba(248,81,73,.3);
+  background:rgba(248,81,73,.08);color:var(--red);
+  cursor:pointer;font-size:11px;font-family:var(--font);font-weight:600;
+  transition:all .12s;align-items:center;gap:4px
+}
+#stop-btn.show{display:flex}
+#stop-btn:hover{background:rgba(248,81,73,.15)}
+.att-btn{
+  background:none;border:none;color:var(--text3);
+  cursor:pointer;font-size:15px;padding:3px;
+  transition:color .12s;display:flex;align-items:center
+}
+.att-btn:hover{color:var(--text)}
+#send-btn{
+  width:29px;height:29px;border-radius:50%;border:none;
+  background:var(--accent);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:filter .12s,transform .1s,background .2s;flex-shrink:0
+}
+#send-btn:hover:not(:disabled){filter:brightness(1.15);transform:scale(1.05)}
+#send-btn:active:not(:disabled){transform:scale(.96)}
+#send-btn:disabled{background:var(--bg3);cursor:default}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Dialogs ── */
+.ov{
+  display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,.7);z-index:999;
+  align-items:center;justify-content:center;
+  backdrop-filter:blur(2px)
+}
+.ov.open{display:flex}
+.dlg{
+  background:var(--bg1);border:1px solid var(--border2);
+  border-radius:var(--r);box-shadow:var(--shadow);
+  display:flex;flex-direction:column
+}
+.dlg-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:13px 16px;border-bottom:1px solid var(--border)
+}
+.dlg-hdr h3{font-size:13px;font-weight:700}
+.dlg-x{background:none;border:none;color:var(--text3);cursor:pointer;font-size:17px;line-height:1}
+.dlg-x:hover{color:var(--text)}
+.dlg-body{flex:1;overflow-y:auto;padding:6px 16px}
+.dlg-body::-webkit-scrollbar{width:3px}
+.dlg-body::-webkit-scrollbar-thumb{background:var(--bg4)}
+.dlg-foot{
+  padding:11px 16px;border-top:1px solid var(--border);
+  display:flex;justify-content:flex-end;gap:7px
+}
+.btn-sec{
+  padding:6px 13px;border-radius:var(--rs);
+  border:1px solid var(--border);background:none;
+  color:var(--text2);cursor:pointer;font-family:var(--font);font-size:12px;
+  transition:all .12s
+}
+.btn-sec:hover{background:var(--bg2);color:var(--text)}
+.btn-pri{
+  padding:6px 13px;border-radius:var(--rs);border:none;
+  background:var(--green);color:#000;font-weight:700;
+  font-size:12px;cursor:pointer;font-family:var(--font);
+  transition:opacity .12s
+}
+.btn-pri:hover{opacity:.87}
+/* Apply-all dialog */
+#adlg{width:min(92vw,520px);max-height:68vh}
+.arow{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 0;border-bottom:1px solid var(--border)
+}
+.arow:last-child{border-bottom:none}
+.arow input[type=checkbox]{
+  width:13px;height:13px;cursor:pointer;
+  accent-color:var(--green);flex-shrink:0
+}
+.arow label{flex:1;font-family:var(--mono);font-size:12px;cursor:pointer;word-break:break-all}
 </style>
 </head>
 <body>
 <div id="app">
 
-<!-- Header -->
+<!-- ═══ Header ═══ -->
 <div id="hdr">
   <div class="hdr-l">
-    <div class="avatar">C</div>
-    <span class="hdr-name">Coforge AI</span>
-    <div id="model-bar">
-      <div class="mdot" id="d-kimi"></div><span>Kimi</span>
-      <span style="color:var(--border2)">·</span>
-      <div class="mdot" id="d-gem"></div><span>Gemini</span>
-      <span style="color:var(--border2)">·</span>
-      <div class="mdot" id="d-gpt"></div><span>GPT-5</span>
+    <div class="logo">C</div>
+    <span class="hdr-brand">Coforge AI</span>
+    <div id="chain">
+      <div class="cdot" id="dk"></div><span>Kimi</span>
+      <span class="csep">·</span>
+      <div class="cdot" id="dg"></div><span>Gemini</span>
+      <span class="csep">·</span>
+      <div class="cdot" id="dp"></div><span>GPT-5</span>
     </div>
   </div>
   <div class="hdr-r">
-    <button class="ibtn" title="New chat" onclick="A.reset()">↺</button>
-    <button class="ibtn" title="Settings" onclick="A.settings()">⚙</button>
+    <button class="hbtn" title="New chat (Ctrl+R)" onclick="A.newChat()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/>
+      </svg>
+    </button>
+    <button class="hbtn" title="Settings" onclick="A.settings()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
   </div>
 </div>
 
-<!-- Chat -->
+<!-- ═══ Chat ═══ -->
 <div id="chat">
   <div id="msgs">
-    <div class="msg-wrap">
+    <!-- Welcome — only visible before first message -->
+    <div class="mw">
       <div id="welcome">
         <div class="w-logo">C</div>
-        <div class="w-title">Coforge AI Agent</div>
-        <div class="w-sub">Kimi reasons · Gemini reviews · GPT-5 implements<br>Vision · Streaming · Agentic test loop</div>
-        <div class="chips">
-          <div class="chip" onclick="A.pf('Explain this code:\n\n```\n\n```')">
-            <span class="chip-ico">💡</span><div><div class="chip-t">Explain Code</div><div class="chip-s">Deep walkthrough</div></div>
-          </div>
-          <div class="chip" onclick="A.pf('Fix the bug in:\n\n```\n\n```')">
-            <span class="chip-ico">🐛</span><div><div class="chip-t">Fix a Bug</div><div class="chip-s">Diagnose & patch</div></div>
-          </div>
-          <div class="chip" onclick="A.pf('Implement: ')">
-            <span class="chip-ico">🏗️</span><div><div class="chip-t">Build Feature</div><div class="chip-s">End-to-end code</div></div>
-          </div>
-          <div class="chip" onclick="A.pf('Write tests for:\n\n```\n\n```')">
-            <span class="chip-ico">🧪</span><div><div class="chip-t">Write Tests</div><div class="chip-s">Unit & widget</div></div>
-          </div>
+        <div class="w-headline">How can I help you?</div>
+        <div class="w-sub">Kimi reasons · Gemini reviews · GPT-5 implements<br>Vision · Realtime streaming · Agentic test loop</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Typing indicator -->
+  <div id="typing">
+    <div class="mw">
+      <div class="typing-inner">
+        <div class="t-av">C</div>
+        <div class="tdots">
+          <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Typing -->
-  <div id="typing">
-    <div class="msg-wrap" style="display:flex;align-items:center;gap:8px;padding:4px 0">
-      <div class="avatar" style="width:22px;height:22px;font-size:10px">C</div>
-      <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-    </div>
-  </div>
-
-  <!-- Terminal -->
+  <!-- Terminal drawer -->
   <div id="term">
     <div class="term-hdr">
-      <span class="term-title">TERMINAL</span>
-      <button class="term-close" onclick="A.closeTerm()">✕</button>
+      <div class="term-label">
+        <div class="term-dot" id="tdot"></div>
+        <span id="tlabel">TERMINAL</span>
+      </div>
+      <button class="term-x" onclick="A.closeTerm()">✕</button>
     </div>
     <div id="term-out"></div>
   </div>
 </div>
 
-<!-- Footer / Input -->
+<!-- ═══ Footer ═══ -->
 <div id="footer">
-<div id="input-box">
-  <div id="attach-bar"></div>
-  <div id="inp-wrap">
-    <div id="file-pop"></div>
-    <textarea id="inp" placeholder="Message Coforge AI… (@ tag file · Shift+Enter newline · Enter send)"></textarea>
+  <!-- Suggestion pills (only before first message) -->
+  <div id="sugg">
+    <button class="spill" onclick="A.pf('Explain this file to me')">Explain code</button>
+    <button class="spill" onclick="A.pf('Find and fix the bug in ')">Fix a bug</button>
+    <button class="spill" onclick="A.pf('Implement ')">Build feature</button>
+    <button class="spill" onclick="A.pf('Write unit tests for ')">Write tests</button>
+    <button class="spill" onclick="A.pf('Refactor ')">Refactor</button>
   </div>
-  <div id="toolbar">
-    <div class="tl">
-      <span id="status"></span>
-      <span id="ibadge" class="ibadge"></span>
-      <button id="stop" onclick="A.stop()">⬛ Stop</button>
-      <div class="tsep"></div>
-      <button class="chip" onclick="A.runTests()">▶ Tests</button>
-      <button class="chip" onclick="A.runBuild()">⚙ Build</button>
-      <button class="chip" onclick="A.runLint()">✓ Lint</button>
+
+  <div id="ibox">
+    <!-- Attachment pills -->
+    <div id="abar"></div>
+
+    <!-- Textarea + file autocomplete -->
+    <div id="iwrap">
+      <div id="fpop"></div>
+      <textarea id="inp"
+        placeholder="Ask anything… (@ to tag a file, ⇧Enter for newline)"
+        rows="1"
+      ></textarea>
     </div>
-    <div class="tr">
-      <button class="att-btn" title="Attach image" onclick="A.pickImg()">📎</button>
-      <button id="send" title="Send (Enter)" onclick="A.send()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
-        </svg>
-      </button>
+
+    <!-- Toolbar -->
+    <div id="tb">
+      <div class="tb-l">
+        <span id="stat"></span>
+        <button id="stop-btn" onclick="A.stop()">
+          <svg width="10" height="10" viewBox="0 0 10 10"><rect width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+          Stop
+        </button>
+        <div class="tsep"></div>
+        <button class="tbtn" onclick="A.runTests()">▶ Tests</button>
+        <button class="tbtn" onclick="A.runBuild()">⚙ Build</button>
+        <button class="tbtn" onclick="A.runLint()">✓ Lint</button>
+      </div>
+      <div class="tb-r">
+        <button class="att-btn" title="Attach image (⌘I)" onclick="A.pickImg()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+        </button>
+        <button id="send-btn" title="Send (Enter)" onclick="A.send()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
-</div>
-</div>
 </div>
 
-<!-- Apply-all dialog -->
-<div class="overlay" id="apply-ov" onclick="if(event.target===this)A.closeApply()">
-  <div class="dialog" id="apply-dlg">
-    <div class="dlg-hdr"><h3>Apply Changes</h3><button class="dlg-close" onclick="A.closeApply()">✕</button></div>
-    <div id="apply-list"></div>
-    <div class="dlg-footer">
-      <button class="btn-cancel" onclick="A.closeApply()">Cancel</button>
-      <button class="btn-ok" onclick="A.confirmApply()">Apply Selected</button>
+</div><!-- #app -->
+
+<!-- ═══ Apply-all dialog ═══ -->
+<div class="ov" id="aov" onclick="if(event.target===this)A.closeApply()">
+  <div class="dlg" id="adlg">
+    <div class="dlg-hdr">
+      <h3>Apply file changes</h3>
+      <button class="dlg-x" onclick="A.closeApply()">✕</button>
+    </div>
+    <div class="dlg-body" id="alist"></div>
+    <div class="dlg-foot">
+      <button class="btn-sec" onclick="A.closeApply()">Cancel</button>
+      <button class="btn-pri" onclick="A.confirmApply()">Apply selected</button>
     </div>
   </div>
 </div>
 
 <script>
-// ── Bridge ────────────────────────────────────────────────────────────────────
+'use strict';
+// ═══════════════════════════════════════════════════════════════
+// Bridge
+// ═══════════════════════════════════════════════════════════════
 let _bridge = null;
-function send2k(obj){ if(_bridge) _bridge(JSON.stringify(obj)); }
-window._bridgeReady = fn => { _bridge = fn; send2k({type:'file_list'}); };
+function b2k(obj){ if(_bridge) _bridge(JSON.stringify(obj)); }
 
-window.onK = raw => {
-  const m = JSON.parse(raw);
-  switch(m.type){
-    case 'token':     A.onToken(m.data);    break;
-    case 'reasoning': A.onReason(m.data);   break;
-    case 'status':    A.setStatus(m.data);  break;
-    case 'complete':  A.onComplete(m.data); break;
-    case 'file_list': A.setFiles(m.data);   break;
-    case 'term_line': A.termLine(m.data, m.cls); break;
-    case 'term_done': A.termDone(m.ok, m.summary); break;
-    case 'applied':   A.onApplied(m.path);  break;
-    case 'apply_err': A.onApplyErr(m.path, m.msg); break;
-    case 'reset':     A.clearMsgs();        break;
-  }
+// Kotlin calls window._bridgeReady(nativeFn) after page load
+window._bridgeReady = fn => {
+  _bridge = fn;
+  b2k({type:'file_list'});
+  document.getElementById('inp').focus();
 };
 
-// ── Markdown ──────────────────────────────────────────────────────────────────
-const MD = (() => {
-  const e = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// Kotlin → JS dispatcher
+window.onK = raw => {
+  try{
+    const m = JSON.parse(raw);
+    switch(m.type){
+      case 'token':     A.onToken(m.data);          break;
+      case 'reasoning': A.onReason(m.data);          break;
+      case 'status':    A.setStatus(m.data);         break;
+      case 'complete':  A.onComplete(m.data);        break;
+      case 'file_list': A.setFiles(m.data);          break;
+      case 'term_line': A.termLine(m.data, m.cls);   break;
+      case 'term_done': A.termDone(m.ok, m.summary); break;
+      case 'applied':   A.onApplied(m.path);         break;
+      case 'apply_err': A.onApplyErr(m.path, m.msg); break;
+      case 'reset':     A.doClear();                 break;
+    }
+  }catch(e){console.error('onK parse error',e)}
+};
 
-  const KW = {
-    kotlin:/\b(fun|val|var|class|object|interface|enum|data|sealed|open|override|private|public|protected|internal|companion|suspend|when|if|else|for|while|return|import|package|null|true|false|this|super|init|constructor|by|in|out|is|as|throw|try|catch|finally|abstract|lateinit|const|inline|reified)\b/g,
-    java:  /\b(public|private|protected|class|interface|static|final|void|int|long|boolean|String|null|true|false|new|return|import|package|if|else|for|while|throw|try|catch|finally|abstract)\b/g,
-    dart:  /\b(void|var|final|const|class|abstract|extends|implements|mixin|return|if|else|for|while|null|true|false|async|await|import|late|required|dynamic|Widget|State|BuildContext)\b/g,
-    js:    /\b(const|let|var|function|class|return|if|else|for|while|async|await|new|null|undefined|true|false|import|export|default|this|typeof|instanceof|throw|try|catch|finally)\b/g,
-    python:/\b(def|class|return|if|elif|else|for|while|import|from|as|None|True|False|and|or|not|in|is|lambda|yield|async|await|self|pass)\b/g,
+// ═══════════════════════════════════════════════════════════════
+// Syntax highlighter
+// ═══════════════════════════════════════════════════════════════
+const SYN = (() => {
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const LANG = {
+    kotlin: /\b(fun|val|var|class|object|interface|enum|data|sealed|open|override|private|public|protected|internal|companion|suspend|when|if|else|for|while|return|import|package|null|true|false|this|super|init|constructor|by|in|out|is|as|throw|try|catch|finally|abstract|lateinit|const|inline|reified|typealias|crossinline|noinline|operator|infix|tailrec|external)\b/g,
+    java:   /\b(public|private|protected|class|interface|static|final|void|int|long|double|float|boolean|char|byte|short|null|true|false|new|return|import|package|if|else|for|while|do|switch|case|break|continue|throw|throws|try|catch|finally|abstract|extends|implements|super|this|instanceof)\b/g,
+    dart:   /\b(void|var|final|const|class|abstract|extends|implements|mixin|return|if|else|for|while|null|true|false|async|await|import|export|part|library|late|required|dynamic|Widget|State|BuildContext|StatefulWidget|StatelessWidget)\b/g,
+    javascript:/\b(const|let|var|function|class|return|if|else|for|while|do|async|await|new|null|undefined|true|false|import|export|default|this|typeof|instanceof|throw|try|catch|finally|of|in|from|delete|void|switch|case|break|continue)\b/g,
+    typescript:/\b(const|let|var|function|class|return|if|else|for|while|do|async|await|new|null|undefined|true|false|import|export|default|this|typeof|instanceof|throw|try|catch|finally|of|in|from|type|interface|enum|extends|implements|abstract|readonly|public|private|protected|as|is|declare|namespace|module|keyof|infer|never|any|unknown)\b/g,
+    python: /\b(def|class|return|if|elif|else|for|while|import|from|as|None|True|False|and|or|not|in|is|lambda|yield|async|await|self|cls|pass|break|continue|raise|try|except|finally|with|global|nonlocal)\b/g,
   };
-
-  function hl(code, lang) {
-    let s = e(code);
-    // strings
-    s = s.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)/g, m=>`<span class=str>${m}</span>`);
+  function highlight(code, lang){
+    let s = esc(code);
+    // strings first (order matters)
+    s = s.replace(/("""[\s\S]*?"""|'''[\s\S]*?''')/g, m=>`<span class=str>${m}</span>`);
+    s = s.replace(/(`[^`\n]*`)/g, m=>`<span class=str>${m}</span>`);
+    s = s.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, m=>`<span class=str>${m}</span>`);
     // comments
     s = s.replace(/(\/\/[^\n]*)/g, m=>`<span class=cm>${m}</span>`);
     s = s.replace(/(\/\*[\s\S]*?\*\/)/g, m=>`<span class=cm>${m}</span>`);
     s = s.replace(/(#[^\n]*)/g, m=>`<span class=cm>${m}</span>`);
-    // annotations
+    // annotations/decorators
     s = s.replace(/(@\w+)/g, m=>`<span class=ann>${m}</span>`);
     // numbers
-    s = s.replace(/\b(\d+\.?\d*[fFdDlL]?)\b/g, m=>`<span class=num>${m}</span>`);
+    s = s.replace(/\b(\d+\.?\d*(?:[eE][+-]?\d+)?[fFdDlLuU]?)\b/g, m=>`<span class=num>${m}</span>`);
     // keywords
-    const kw = KW[lang] || KW.kotlin;
+    const kw = LANG[lang] || LANG.kotlin;
     s = s.replace(kw, m=>`<span class=kw>${m}</span>`);
     return s;
   }
+  return {highlight};
+})();
 
-  function inline(s) {
-    s = e(s);
+// ═══════════════════════════════════════════════════════════════
+// Markdown renderer
+// ═══════════════════════════════════════════════════════════════
+const MD = (() => {
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const uid = () => Math.random().toString(36).slice(2,8);
+
+  function inline(s){
+    s = esc(s);
     s = s.replace(/\*\*\*(.+?)\*\*\*/g,'<strong><em>$1</em></strong>');
     s = s.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
     s = s.replace(/__(.+?)__/g,'<strong>$1</strong>');
     s = s.replace(/\*(.+?)\*/g,'<em>$1</em>');
+    s = s.replace(/_(.+?)_/g,'<em>$1</em>');
     s = s.replace(/~~(.+?)~~/g,'<del>$1</del>');
     s = s.replace(/`([^`]+)`/g,'<code>$1</code>');
-    s = s.replace(/\[([^\]]+)\]\([^)]+\)/g,'<a href="#" onclick="return false">$1</a>');
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
     return s;
   }
 
-  function codeBlock(lang, code) {
-    const id = Math.random().toString(36).slice(2);
-    const hi = hl(code, lang.toLowerCase());
-    const esc = code.replace(/\\/g,'\\\\').replace(/`/g,'\\`');
-    return `<div class="code-block"><div class="code-hdr"><span class="code-lang">${e(lang)||'code'}</span><button class="code-copy" id="cc${id}" onclick="copyCode(this,\`${esc}\`)">Copy</button></div><pre class="code-pre"><code>${hi}</code></pre></div>`;
+  function codeBlock(lang, code){
+    const id = uid();
+    const l = lang.trim().toLowerCase() || 'text';
+    const hi = SYN.highlight(code, l);
+    const esc2 = code.replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$');
+    return `<div class="cb"><div class="cb-hdr"><span class="cb-lang">${esc(l)}</span><button class="cb-copy" id="cc${id}" onclick="copyCode(this,\`${esc2}\`)">Copy</button></div><pre class="cb-pre"><code>${hi}</code></pre></div>`;
   }
 
-  function render(md) {
-    const blocks = []; // extracted code blocks
-    md = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code)=>{
+  function render(md){
+    if(!md) return '';
+    const blocks = [];
+    // extract fenced code blocks
+    md = md.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_, lang, code)=>{
       const i = blocks.length;
-      blocks.push({lang, code: code.trimEnd()});
-      return `\x00BLOCK${i}\x00`;
+      blocks.push(codeBlock(lang, code.trimEnd()));
+      return `\x00CB${i}\x00`;
     });
+    // inline code that spans lines (protect from inline processing)
+    const ic = [];
+    md = md.replace(/`([^`]+)`/g, (m)=>{ ic.push(m); return `\x00IC${ic.length-1}\x00`; });
 
     const lines = md.split('\n');
-    let html='', inUl=false, inOl=false, inBq=false;
-    const cAll = ()=>{
-      if(inUl){html+='</ul>';inUl=false}
-      if(inOl){html+='</ol>';inOl=false}
-      if(inBq){html+='</blockquote>';inBq=false}
+    let html = '', ul = false, ol = false, bq = false, table = false;
+    const closeAll = () => {
+      if(ul){html+='</ul>';ul=false}
+      if(ol){html+='</ol>';ol=false}
+      if(bq){html+='</blockquote>';bq=false}
+      if(table){html+='</table>';table=false}
     };
 
-    for(const line of lines){
-      const bm = line.match(/^\x00BLOCK(\d+)\x00$/);
-      if(bm){ cAll(); const b=blocks[+bm[1]]; html+=codeBlock(b.lang,b.code); continue; }
-      if(line.startsWith('### ')){cAll();html+=`<h3>${inline(line.slice(4))}</h3>`;continue}
-      if(line.startsWith('## ')){ cAll();html+=`<h2>${inline(line.slice(3))}</h2>`;continue}
-      if(line.startsWith('# ')){  cAll();html+=`<h1>${inline(line.slice(2))}</h1>`;continue}
-      if(/^---+$/.test(line)){    cAll();html+='<hr>';continue}
-      if(line.startsWith('> ')){
-        if(inUl||inOl)cAll();
-        if(!inBq){html+='<blockquote>';inBq=true}
-        html+=inline(line.slice(2))+' ';continue
+    for(let i=0;i<lines.length;i++){
+      const line = lines[i];
+      // code block placeholder
+      const cbm = line.match(/^\x00CB(\d+)\x00$/);
+      if(cbm){ closeAll(); html+=blocks[+cbm[1]]; continue; }
+      // headings
+      const hm = line.match(/^(#{1,4})\s+(.*)/);
+      if(hm){ closeAll(); const t=inline(hm[2]); html+=`<h${hm[1].length}>${t}</h${hm[1].length}>`; continue; }
+      // hr
+      if(/^---+$|^\*\*\*+$/.test(line.trim())){ closeAll(); html+='<hr>'; continue; }
+      // blockquote
+      if(line.startsWith('> ')){ if(ul||ol)closeAll(); if(!bq){html+='<blockquote>';bq=true} html+=inline(line.slice(2))+'\n'; continue; }
+      // table header
+      if(line.includes('|') && lines[i+1]?.match(/^\|[-:| ]+\|/)){
+        closeAll();
+        const hdrs = line.split('|').filter(c=>c.trim()).map(c=>`<th>${inline(c.trim())}</th>`).join('');
+        html+=`<table><thead><tr>${hdrs}</tr></thead><tbody>`;
+        table=true; i++; continue; // skip separator
       }
-      if(/^[-*] /.test(line)){
-        if(inOl||inBq)cAll();
-        if(!inUl){html+='<ul>';inUl=true}
-        html+=`<li>${inline(line.slice(2))}</li>`;continue
-      }
-      if(/^\d+\. /.test(line)){
-        if(inUl||inBq)cAll();
-        if(!inOl){html+='<ol>';inOl=true}
-        html+=`<li>${inline(line.replace(/^\d+\. /,''))}</li>`;continue
-      }
-      if(line.trim()===''){cAll();html+='<p></p>';continue}
-      cAll();html+=`<p>${inline(line)}</p>`;
+      // table row
+      if(table && line.includes('|')){
+        const cells = line.split('|').filter(c=>c.trim()).map(c=>`<td>${inline(c.trim())}</td>`).join('');
+        html+=`<tr>${cells}</tr>`; continue;
+      } else if(table){ closeAll(); }
+      // ul
+      if(/^[-*+] /.test(line)){ if(ol||bq)closeAll(); if(!ul){html+='<ul>';ul=true} html+=`<li>${inline(line.slice(2))}</li>`; continue; }
+      // ol
+      if(/^\d+[.)]\s/.test(line)){ if(ul||bq)closeAll(); if(!ol){html+='<ol>';ol=true} html+=`<li>${inline(line.replace(/^\d+[.)]\s/,''))}</li>`; continue; }
+      // blank
+      if(!line.trim()){ closeAll(); continue; }
+      // paragraph
+      closeAll(); html+=`<p>${inline(line)}</p>`;
     }
-    cAll(); return html;
+    closeAll();
+    // restore inline code
+    html = html.replace(/\x00IC(\d+)\x00/g, (_,i)=>`<code>${esc(ic[+i].slice(1,-1))}</code>`);
+    return html;
   }
 
   return {render};
 })();
 
-function copyCode(btn, code){
-  navigator.clipboard?.writeText(code).catch(()=>send2k({type:'copy',text:code}));
-  btn.textContent='Copied!';btn.classList.add('ok');
-  setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('ok')},1600);
-}
+window.copyCode = (btn, code) => {
+  const txt = code;
+  const id = btn.id;
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(txt).catch(()=>b2k({type:'copy',text:txt}));
+  } else {
+    b2k({type:'copy',text:txt});
+  }
+  btn.textContent = 'Copied!';
+  btn.classList.add('ok');
+  setTimeout(()=>{ btn.textContent='Copy'; btn.classList.remove('ok'); }, 1800);
+};
 
-// ── File change parser ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// File-change parser
+// ═══════════════════════════════════════════════════════════════
 function parseFC(text){
-  const out=[];
-  const fc=/<file_change\s+path="([^"]+)">([\s\S]*?)<\/file_change>/g;
-  const nf=/<new_file\s+path="([^"]+)">([\s\S]*?)<\/new_file>/g;
+  const out = [];
   let m;
-  while((m=fc.exec(text))!==null)out.push({path:m[1].trim(),content:m[2].trim(),isNew:false});
-  while((m=nf.exec(text))!==null)out.push({path:m[1].trim(),content:m[2].trim(),isNew:true});
+  const re1 = /<file_change\s+path="([^"]+)">([\s\S]*?)<\/file_change>/g;
+  const re2 = /<new_file\s+path="([^"]+)">([\s\S]*?)<\/new_file>/g;
+  while((m=re1.exec(text))!==null) out.push({path:m[1].trim(),content:m[2].trim(),isNew:false});
+  while((m=re2.exec(text))!==null) out.push({path:m[1].trim(),content:m[2].trim(),isNew:true});
   return out;
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// Main App
+// ═══════════════════════════════════════════════════════════════
 const A = (() => {
-  let streaming=false, streamEl=null, streamRaw='', bodyEl=null, reasonEl=null;
-  let allChanges=[], pendImgs=[], taggedFiles=[], fileList=[], filePicking=false, fileQ='';
-  let applyPending=[];
+  // State
+  let streaming   = false;
+  let streamRaw   = '';
+  let streamEl    = null;  // the .stream-text span
+  let bodyEl      = null;  // .ai-body div
+  let thinkEl     = null;  // .think div
+  let thinkBodyEl = null;
+  let thinkSpinEl = null;
+  let thinkHdrEl  = null;
+  let thinkLabel  = null;
+  let thinkStart  = 0;
+  let allFC       = [];
+  let pendImgs    = [];
+  let taggedFiles = [];
+  let fileList    = [];
+  let filePicking = false;
+  let fileQ       = '';
+  let applyPending= [];
+  let isWelcome   = true;
 
-  const $msgs   = document.getElementById('msgs');
-  const $welcome= document.getElementById('welcome');
-  const $typing = document.getElementById('typing');
-  const $inp    = document.getElementById('inp');
-  const $status = document.getElementById('status');
-  const $ibadge = document.getElementById('ibadge');
-  const $stop   = document.getElementById('stop');
-  const $send   = document.getElementById('send');
-  const $abar   = document.getElementById('attach-bar');
-  const $term   = document.getElementById('term');
-  const $termO  = document.getElementById('term-out');
-  const $fpop   = document.getElementById('file-pop');
-  const $applyOv= document.getElementById('apply-ov');
-  const $applyL = document.getElementById('apply-list');
+  // Token batching for smooth streaming
+  let tokQueue   = '';
+  let rafId      = null;
+  // Reasoning batching
+  let reasonQueue = '';
+  let reasonRafId = null;
 
-  // Input auto-grow
-  $inp.addEventListener('input', ()=>{
-    $inp.style.height='auto';
-    $inp.style.height=Math.min($inp.scrollHeight,180)+'px';
+  // DOM refs
+  const $msgs    = document.getElementById('msgs');
+  const $welcome = document.getElementById('welcome');
+  const $typing  = document.getElementById('typing');
+  const $inp     = document.getElementById('inp');
+  const $stat    = document.getElementById('stat');
+  const $stop    = document.getElementById('stop-btn');
+  const $send    = document.getElementById('send-btn');
+  const $abar    = document.getElementById('abar');
+  const $term    = document.getElementById('term');
+  const $termOut = document.getElementById('term-out');
+  const $fpop    = document.getElementById('fpop');
+  const $sugg    = document.getElementById('sugg');
+  const $aov     = document.getElementById('aov');
+  const $alist   = document.getElementById('alist');
+  const $tdot    = document.getElementById('tdot');
+
+  // ── Input auto-grow ──────────────────────────────────────────
+  $inp.addEventListener('input', () => {
+    $inp.style.height = 'auto';
+    $inp.style.height = Math.min($inp.scrollHeight, 180) + 'px';
     handleAt();
   });
-  $inp.addEventListener('keydown', e=>{
-    if(filePicking){navPop(e);return}
-    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}
+  $inp.addEventListener('keydown', e => {
+    if(filePicking){ navPop(e); return; }
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }
   });
+  $inp.addEventListener('focus', () => {});
 
-  // @ file picker
+  // ── @ file picker ─────────────────────────────────────────────
   function handleAt(){
-    const val=$inp.value, cur=$inp.selectionStart, before=val.slice(0,cur);
-    const ai=before.lastIndexOf('@');
-    if(ai>=0&&!before.slice(ai+1).includes(' ')){
-      fileQ=before.slice(ai+1).toLowerCase(); renderPop();
-    } else closePop();
+    const v=$inp.value, c=$inp.selectionStart, before=v.slice(0,c);
+    const ai = before.lastIndexOf('@');
+    if(ai>=0 && !before.slice(ai+1).includes(' ')){
+      fileQ = before.slice(ai+1).toLowerCase(); renderPop();
+    } else { closePop(); }
   }
   function renderPop(){
-    const f=fileList.filter(n=>n.toLowerCase().includes(fileQ)).slice(0,12);
-    if(!f.length){closePop();return}
-    $fpop.innerHTML=f.map((n,i)=>`<div class="fitem${i===0?' sel':''}" onmousedown="A.selFile('${n.replace(/'/g,"&#39;")}',event)">${n}</div>`).join('');
-    $fpop.classList.add('open'); filePicking=true;
+    const filtered = fileList.filter(n=>n.toLowerCase().includes(fileQ)).slice(0,14);
+    if(!filtered.length){ closePop(); return; }
+    $fpop.innerHTML = filtered.map((n,i)=>`<div class="fi${i===0?' sel':''}" onmousedown="A.selFile('${n.replace(/'/g,"&#39;")}',event)"><span class="fi-ico">📄</span>${n}</div>`).join('');
+    $fpop.classList.add('open'); filePicking = true;
   }
-  function closePop(){$fpop.classList.remove('open');filePicking=false}
+  function closePop(){ $fpop.classList.remove('open'); filePicking = false; }
   function navPop(e){
-    const items=[...$fpop.querySelectorAll('.fitem')];
+    const items=[...$fpop.querySelectorAll('.fi')];
     let sel=items.findIndex(el=>el.classList.contains('sel'));
-    if(e.key==='ArrowDown'){e.preventDefault();sel=(sel+1)%items.length;items.forEach((el,i)=>el.classList.toggle('sel',i===sel))}
-    else if(e.key==='ArrowUp'){e.preventDefault();sel=(sel-1+items.length)%items.length;items.forEach((el,i)=>el.classList.toggle('sel',i===sel))}
-    else if(e.key==='Enter'){e.preventDefault();const s=$fpop.querySelector('.sel');if(s)selFile(s.textContent,e)}
-    else if(e.key==='Escape')closePop();
-  }
-  function selFile(name,e){
-    if(e)e.preventDefault();
-    const val=$inp.value, cur=$inp.selectionStart, ai=val.slice(0,cur).lastIndexOf('@');
-    $inp.value=val.slice(0,ai)+val.slice(cur); closePop();
-    addFilePill(name); $inp.focus();
-    send2k({type:'tag_file',name});
+    if(e.key==='ArrowDown'){ e.preventDefault(); sel=(sel+1)%items.length; }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); sel=(sel-1+items.length)%items.length; }
+    else if(e.key==='Enter'){ e.preventDefault(); const s=$fpop.querySelector('.sel'); if(s) selFile(s.querySelector('span+')?.textContent??s.textContent.trim(),e); return; }
+    else if(e.key==='Escape'){ closePop(); return; }
+    items.forEach((el,i)=>el.classList.toggle('sel',i===sel));
   }
 
-  // Attach pills
+  function selFile(name, e){
+    if(e) e.preventDefault();
+    const v=$inp.value, c=$inp.selectionStart, ai=v.slice(0,c).lastIndexOf('@');
+    $inp.value = v.slice(0,ai)+v.slice(c);
+    closePop(); addFilePill(name); $inp.focus();
+    b2k({type:'tag_file',name});
+  }
+
+  // ── Attachment pills ──────────────────────────────────────────
   function addFilePill(name){
-    if(taggedFiles.includes(name))return; taggedFiles.push(name);
-    const div=document.createElement('div'); div.className='pill'; div.dataset.f=name;
-    div.innerHTML=`📄 ${name} <button class="pill-x" onclick="A.remFile('${name.replace(/'/g,"&#39;")}')">×</button>`;
-    $abar.appendChild(div); $abar.classList.add('has');
+    if(taggedFiles.includes(name)) return;
+    taggedFiles.push(name);
+    const d=document.createElement('div'); d.className='ap'; d.dataset.f=name;
+    d.innerHTML=`📄 ${name} <button class="ap-x" onclick="A.remFile('${name.replace(/'/g,"&#39;")}')">×</button>`;
+    $abar.appendChild(d); $abar.classList.add('has');
   }
   function remFile(name){
     taggedFiles=taggedFiles.filter(f=>f!==name);
-    const el=$abar.querySelector(`[data-f="${name}"]`);if(el)el.remove();
-    if(!$abar.children.length)$abar.classList.remove('has');
+    $abar.querySelector(`[data-f="${CSS.escape(name)}"]`)?.remove();
+    if(!$abar.children.length) $abar.classList.remove('has');
   }
-  function addImage(b64,name){
-    pendImgs.push(b64);const idx=pendImgs.length-1;
-    const div=document.createElement('div'); div.className='pill img-pill'; div.dataset.i=idx;
-    div.innerHTML=`<img class="img-th" src="data:image/png;base64,${b64}"> ${name} <button class="pill-x" onclick="A.remImg(${idx})">×</button>`;
-    $abar.appendChild(div); $abar.classList.add('has');
+  function addImage(b64, name){
+    pendImgs.push(b64); const idx=pendImgs.length-1;
+    const d=document.createElement('div'); d.className='ap ap-img'; d.dataset.i=idx;
+    d.innerHTML=`<img class="ap-th" src="data:image/png;base64,${b64}"> ${name} <button class="ap-x" onclick="A.remImg(${idx})">×</button>`;
+    $abar.appendChild(d); $abar.classList.add('has');
   }
   function remImg(idx){
     pendImgs[idx]=null;
-    const el=$abar.querySelector(`[data-i="${idx}"]`);if(el)el.remove();
-    if(!$abar.children.length)$abar.classList.remove('has');
+    $abar.querySelector(`[data-i="${idx}"]`)?.remove();
+    if(!$abar.children.length) $abar.classList.remove('has');
   }
 
-  function showChat(){$welcome.style.display='none'}
-
-  // ── Messages ──
-  function addUser(text,imgCount){
-    showChat();
-    const wrap=mkWrap();
-    const img=imgCount>0?`<div style="color:var(--accent2);font-size:11px;margin-top:4px">📎 ${imgCount} image(s)</div>`:'';
-    wrap.innerHTML=`<div class="msg-user"><div class="user-bub md">${MD.render(text)}${img}</div></div>`;
-    $msgs.appendChild(wrap); scrollB();
+  // ── Welcome ───────────────────────────────────────────────────
+  function hideWelcome(){
+    if(!isWelcome) return;
+    isWelcome=false;
+    $welcome.style.transition='opacity .2s';
+    $welcome.style.opacity='0';
+    setTimeout(()=>{ $welcome.style.display='none'; },200);
+    $sugg.classList.add('hidden');
   }
 
+  // ── Message helpers ───────────────────────────────────────────
+  function mkWrap(){ const d=document.createElement('div'); d.className='mw'; return d; }
+  function scrollB(force){
+    // only auto-scroll if near bottom (< 80px away)
+    const el = $msgs;
+    if(force || el.scrollHeight - el.scrollTop - el.clientHeight < 80){
+      requestAnimationFrame(()=>{ el.scrollTop=el.scrollHeight; });
+    }
+  }
+
+  // ── Add user message ─────────────────────────────────────────
+  function addUserMsg(text, imgs){
+    hideWelcome();
+    const w=mkWrap();
+    let imgHtml='';
+    if(imgs.length){
+      imgHtml=`<div class="user-img-row">${imgs.map(b=>`<img class="user-img-thumb" src="data:image/png;base64,${b}">`).join('')}</div>`;
+    }
+    w.innerHTML=`<div class="msg-user"><div class="user-bub">${MD.render(text)}${imgHtml}</div></div>`;
+    $msgs.appendChild(w); scrollB(true);
+  }
+
+  // ── Start AI response ────────────────────────────────────────
   function startAI(){
-    showChat();
+    if(streaming) return;
+    streaming=true; streamRaw='';
     $typing.classList.remove('show');
-    const wrap=mkWrap();
-    wrap.innerHTML=`
-      <div class="msg-ai" id="cur-msg">
-        <div class="ai-meta"><div class="avatar" style="width:22px;height:22px;font-size:10px">C</div><span class="ai-name">Coforge AI</span></div>
-        <div class="reasoning" style="display:none">
-          <button class="reasoning-hdr" onclick="toggleR(this)"><i class="chev">▶</i> Thinking</button>
-          <div class="reasoning-body"></div>
+    const w=mkWrap();
+    w.innerHTML=`
+      <div class="msg-ai" id="cur-ai">
+        <div class="ai-meta">
+          <div class="ai-av">C</div>
+          <span class="ai-name">Coforge AI</span>
         </div>
-        <div class="ai-body">
-          <div class="stream-text"></div>
+        <!-- thinking block, hidden until reasoning arrives -->
+        <div class="think" id="cur-think" style="display:none">
+          <button class="think-hdr" id="cur-think-hdr" onclick="toggleThink(this)">
+            <div class="think-spin active" id="cur-think-spin"></div>
+            <span id="cur-think-label">Thinking…</span>
+            <span class="think-chev">▾</span>
+          </button>
+          <div class="think-body" id="cur-think-body"></div>
+        </div>
+        <div class="ai-body" id="cur-body">
+          <span class="stream-cursor" id="cur-stream"></span>
         </div>
         <div class="msg-acts">
-          <button class="abtn" onclick="A.copyLast()">Copy</button>
-          <button class="abtn" onclick="A.retry()">Retry</button>
+          <button class="mact" onclick="A.copyLast()">Copy</button>
+          <button class="mact" onclick="A.retry()">↺ Retry</button>
         </div>
       </div>`;
-    $msgs.appendChild(wrap);
-    const msg=wrap.querySelector('#cur-msg');
-    msg.classList.add('streaming');
-    streamEl=msg.querySelector('.stream-text');
-    bodyEl=msg.querySelector('.ai-body');
-    reasonEl=msg.querySelector('.reasoning');
-    streaming=true; streamRaw=''; scrollB();
+    $msgs.appendChild(w);
+    streamEl    = document.getElementById('cur-stream');
+    bodyEl      = document.getElementById('cur-body');
+    thinkEl     = document.getElementById('cur-think');
+    thinkBodyEl = document.getElementById('cur-think-body');
+    thinkSpinEl = document.getElementById('cur-think-spin');
+    thinkHdrEl  = document.getElementById('cur-think-hdr');
+    thinkLabel  = document.getElementById('cur-think-label');
+    thinkStart  = Date.now();
+    scrollB(true);
   }
 
-  function toggleR(btn){
-    btn.classList.toggle('open');
-    btn.nextElementSibling.classList.toggle('show');
-  }
-  window.toggleR=toggleR;
+  window.toggleThink = btn => {
+    btn.classList.toggle('collapsed');
+    btn.nextElementSibling.classList.toggle('collapsed');
+  };
 
-  function onToken(tok){
-    $typing.classList.remove('show');
-    if(!streaming){startAI()}
-    streamRaw+=tok;
-    if(streamEl) streamEl.textContent=streamRaw;
+  // ── Token flush (rAF batched) ─────────────────────────────────
+  function flushTokens(){
+    rafId=null;
+    if(!tokQueue) return;
+    streamRaw += tokQueue; tokQueue='';
+    if(streamEl) streamEl.textContent = streamRaw;
     scrollB();
   }
 
-  function onReason(text){
-    if(!reasonEl)return;
-    reasonEl.style.display='block';
-    const b=reasonEl.querySelector('.reasoning-body');
-    if(b)b.textContent=text;
+  // ── Reasoning flush (rAF batched) ────────────────────────────
+  function flushReason(){
+    reasonRafId=null;
+    if(!reasonQueue || !thinkBodyEl) return;
+    thinkBodyEl.textContent += reasonQueue; reasonQueue='';
+    thinkBodyEl.scrollTop = thinkBodyEl.scrollHeight;
   }
 
-  function onComplete(full){
+  // ── onToken — realtime streaming ─────────────────────────────
+  function onToken(tok){
     $typing.classList.remove('show');
-    if(!streaming){startAI()}
+    if(!streaming) startAI();
+    tokQueue += tok;
+    if(!rafId) rafId = requestAnimationFrame(flushTokens);
+  }
+
+  // ── onReason — realtime thinking ─────────────────────────────
+  function onReason(text){
+    if(!streaming) startAI();
+    if(!thinkEl) return;
+    // Show thinking block on first reasoning token
+    if(thinkEl.style.display==='none'){
+      thinkEl.style.display='block';
+    }
+    reasonQueue += text;
+    if(!reasonRafId) reasonRafId = requestAnimationFrame(flushReason);
+  }
+
+  // ── onComplete ───────────────────────────────────────────────
+  function onComplete(full){
+    // flush any remaining queued tokens
+    if(tokQueue){ streamRaw+=tokQueue; tokQueue=''; }
+    if(reasonQueue && thinkBodyEl){ thinkBodyEl.textContent+=reasonQueue; reasonQueue=''; }
+
+    $typing.classList.remove('show');
+    if(!streaming) startAI();
     streaming=false;
-    const msg=$msgs.querySelector('#cur-msg');
-    if(msg){msg.classList.remove('streaming');msg.removeAttribute('id')}
-    allChanges=parseFC(full);
+
+    // finalize thinking block
+    if(thinkEl && thinkEl.style.display!=='none'){
+      const dur = ((Date.now()-thinkStart)/1000).toFixed(1);
+      if(thinkSpinEl) thinkSpinEl.classList.remove('active');
+      if(thinkLabel) thinkLabel.textContent = `Thought for ${dur}s`;
+      // auto-collapse when complete
+      if(thinkHdrEl) thinkHdrEl.classList.add('collapsed');
+      if(thinkBodyEl) thinkBodyEl.classList.add('collapsed');
+    }
+
+    // finalize AI message
+    const ai = document.getElementById('cur-ai');
+    if(ai) ai.removeAttribute('id');
+
+    // parse file changes
+    allFC = parseFC(full);
+
+    // render body
     if(bodyEl){
-      bodyEl.innerHTML='';
-      const disp=full.replace(/<file_change[^>]*>[\s\S]*?<\/file_change>/g,'')
-                     .replace(/<new_file[^>]*>[\s\S]*?<\/new_file>/g,'').trim();
-      const md=document.createElement('div'); md.className='md';
-      md.innerHTML=MD.render(disp); bodyEl.appendChild(md);
-      allChanges.forEach(fc=>bodyEl.appendChild(buildFC(fc)));
-      if(allChanges.length>=2){
+      // strip <file_change> / <new_file> tags from displayed text
+      const disp = full
+        .replace(/<file_change\s+path="[^"]*">[\s\S]*?<\/file_change>/g,'')
+        .replace(/<new_file\s+path="[^"]*">[\s\S]*?<\/new_file>/g,'')
+        .trim();
+
+      bodyEl.innerHTML=''; // remove stream cursor
+      const mdDiv = document.createElement('div'); mdDiv.className='md';
+      mdDiv.innerHTML = MD.render(disp);
+      bodyEl.appendChild(mdDiv);
+
+      // render file change proposals
+      allFC.forEach(fc => bodyEl.appendChild(buildFC(fc)));
+
+      // apply-all bar if multiple files
+      if(allFC.length >= 2){
         const bar=document.createElement('div'); bar.className='apply-bar';
-        bar.innerHTML=`<span>${allChanges.length} files proposed</span><button class="apply-all-btn" onclick="A.openApply()">Apply All ${allChanges.length}</button>`;
+        bar.innerHTML=`<div class="apply-bar-l"><strong>${allFC.length} files</strong> proposed</div><button class="apply-all-btn" onclick="A.openApply()">Apply all ${allFC.length}</button>`;
         bodyEl.appendChild(bar);
       }
     }
-    streamEl=null; bodyEl=null; reasonEl=null; streamRaw='';
-    setSending(false); scrollB();
+
+    streamEl=null; bodyEl=null; thinkEl=null;
+    thinkBodyEl=null; thinkSpinEl=null;
+    thinkHdrEl=null; thinkLabel=null;
+    setSending(false); scrollB(true);
   }
 
   function buildFC(fc){
@@ -629,127 +1153,173 @@ const A = (() => {
     const div=document.createElement('div'); div.className='fc'; div.id=id; div._fc=fc;
     div.innerHTML=`<div class="fc-hdr">
       <div class="fc-l">
-        <span class="badge ${fc.isNew?'badge-new':'badge-edit'}">${fc.isNew?'NEW':'EDIT'}</span>
+        <span class="badge ${fc.isNew?'b-new':'b-edit'}">${fc.isNew?'NEW':'EDIT'}</span>
         <span class="fc-path">${fc.path}</span>
       </div>
       <div class="fc-btns">
-        <button class="fc-btn fc-skip" onclick="document.getElementById('${id}').remove()">Skip</button>
-        <button class="fc-btn fc-apply" id="${id}-ab" onclick="A.applyOne('${id}')">Apply</button>
+        <button class="fcbtn fcbtn-skip" onclick="document.getElementById('${id}').remove()">Skip</button>
+        <button class="fcbtn fcbtn-apply" id="${id}-ab" onclick="A.applyOne('${id}')">Apply</button>
       </div>
     </div>`;
     return div;
   }
 
-  // ── Send ──
+  // ── Send ──────────────────────────────────────────────────────
   function send(){
     const text=$inp.value.trim();
     const imgs=pendImgs.filter(Boolean);
-    if(!text&&!imgs.length)return;
-    if(streaming)return;
+    if((!text&&!imgs.length)||streaming) return;
     $inp.value=''; $inp.style.height='auto';
     const tagged=[...taggedFiles];
     pendImgs=[]; taggedFiles=[]; $abar.innerHTML=''; $abar.classList.remove('has');
-    addUser(text,imgs.length);
-    $typing.classList.add('show'); setSending(true);
-    send2k({type:'send',text,images:imgs,tagged});
+    addUserMsg(text, imgs);
+    $typing.classList.add('show');
+    setSending(true);
+    b2k({type:'send', text, images:imgs, tagged});
   }
 
   function setSending(on){
-    $send.disabled=on; $stop.classList.toggle('show',on);
-    if(!on){setStatus('');$ibadge.style.display='none';resetDots()}
+    $send.disabled=on;
+    $stop.classList.toggle('show',on);
+    if(!on){ setStatus(''); resetDots(); }
   }
+
+  // ── Status / model chain indicator ───────────────────────────
   function setStatus(s){
-    $status.textContent=s;
-    if(/kimi/i.test(s))   setDot('kimi');
-    else if(/gemini/i.test(s)) setDot('gem');
-    else if(/gpt|implement/i.test(s)) setDot('gpt');
+    $stat.textContent=s;
+    $stat.classList.toggle('active',!!s);
+    const lower=(s||'').toLowerCase();
+    if(lower.includes('kimi'))     setDot('k');
+    else if(lower.includes('gemini')) setDot('g');
+    else if(lower.includes('gpt')||lower.includes('implement')) setDot('p');
+    else resetDots();
   }
-  const DOTS={kimi:'d-kimi',gem:'d-gem',gpt:'d-gpt'};
-  function setDot(k){ Object.values(DOTS).forEach(id=>document.getElementById(id)?.classList.remove('on')); document.getElementById(DOTS[k])?.classList.add('on'); }
-  function resetDots(){ Object.values(DOTS).forEach(id=>document.getElementById(id)?.classList.remove('on')); }
-
-  // ── Actions ──
-  function stop(){send2k({type:'stop'});setSending(false);$typing.classList.remove('show')}
-  function settings(){send2k({type:'settings'})}
-  function pickImg(){send2k({type:'pick_image'})}
-  function runTests(){send2k({type:'run_tests'})}
-  function runBuild(){send2k({type:'run_build'})}
-  function runLint(){send2k({type:'run_lint'})}
-  function pf(text){$inp.value=text;$inp.style.height='auto';$inp.style.height=Math.min($inp.scrollHeight,180)+'px';$inp.focus();$inp.setSelectionRange(text.length,text.length)}
-  function prefill(text){pf(text)}
-  function reset(){send2k({type:'reset'})}
-  function clearMsgs(){
-    $msgs.innerHTML=''; $msgs.appendChild(mkWrap()); $msgs.firstChild.appendChild($welcome);
-    $welcome.style.display=''; $typing.classList.remove('show');
-    allChanges=[]; setSending(false); setStatus('');
+  function setDot(k){
+    ['dk','dg','dp'].forEach(id=>document.getElementById(id)?.classList.remove('active'));
+    document.getElementById('d'+k)?.classList.add('active');
   }
-  function retry(){send2k({type:'retry'})}
-  function copyLast(){navigator.clipboard?.writeText(streamRaw).catch(()=>send2k({type:'copy',text:streamRaw}))}
+  function resetDots(){
+    ['dk','dg','dp'].forEach(id=>document.getElementById(id)?.classList.remove('active'));
+  }
 
-  // Apply
+  // ── Actions ───────────────────────────────────────────────────
+  function stop(){ b2k({type:'stop'}); setSending(false); $typing.classList.remove('show'); }
+  function settings(){ b2k({type:'settings'}); }
+  function pickImg(){ b2k({type:'pick_image'}); }
+  function runTests(){ openTerminal('▶ Running tests…'); b2k({type:'run_tests'}); }
+  function runBuild(){ openTerminal('⚙ Building…'); b2k({type:'run_build'}); }
+  function runLint(){  openTerminal('✓ Linting…');  b2k({type:'run_lint'}); }
+
+  function pf(text){
+    $inp.value=text;
+    $inp.style.height='auto';
+    $inp.style.height=Math.min($inp.scrollHeight,180)+'px';
+    $inp.focus();
+    $inp.setSelectionRange(text.length,text.length);
+  }
+  function prefill(text){ pf(text); }
+
+  function newChat(){ b2k({type:'reset'}); }
+  function doClear(){
+    // Remove all message nodes except the welcome wrapper
+    while($msgs.firstChild) $msgs.removeChild($msgs.firstChild);
+    const w=mkWrap(); $msgs.appendChild(w); w.appendChild($welcome);
+    isWelcome=true;
+    $welcome.style.display='';
+    $welcome.style.opacity='';
+    $sugg.classList.remove('hidden');
+    $typing.classList.remove('show');
+    allFC=[]; streaming=false; streamRaw='';
+    setSending(false); setStatus('');
+  }
+
+  function retry(){ b2k({type:'retry'}); }
+  function copyLast(){
+    if(navigator.clipboard) navigator.clipboard.writeText(streamRaw).catch(()=>b2k({type:'copy',text:streamRaw}));
+    else b2k({type:'copy',text:streamRaw});
+  }
+
+  // ── Apply files ───────────────────────────────────────────────
   function applyOne(id){
     const el=document.getElementById(id); if(!el||!el._fc)return;
     const btn=document.getElementById(id+'-ab');
-    if(btn){btn.textContent='Applying…';btn.classList.add('done')}
-    send2k({type:'apply_file',path:el._fc.path,content:el._fc.content,is_new:el._fc.isNew});
+    if(btn){btn.textContent='Applying…';btn.classList.add('done');}
+    b2k({type:'apply_file', path:el._fc.path, content:el._fc.content, is_new:el._fc.isNew});
   }
   function onApplied(path){
     sysLine(`✓ Applied: ${path}`);
     document.querySelectorAll('.fc').forEach(el=>{
-      if(el._fc?.path===path){const b=el.querySelector('.fc-apply');if(b){b.innerHTML='<span class="badge badge-ok">DONE</span>';b.classList.add('done')}}
+      if(el._fc?.path===path){
+        const b=el.querySelector('.fcbtn-apply');
+        if(b){ b.innerHTML='<span class="badge b-done">DONE</span>'; b.classList.add('done'); }
+      }
     });
   }
-  function onApplyErr(path,msg){sysLine(`✗ Failed: ${path} — ${msg}`,true)}
+  function onApplyErr(path,msg){ sysLine(`✗ ${path}: ${msg}`, true); }
+
   function openApply(){
-    applyPending=[...allChanges];
-    $applyL.innerHTML=applyPending.map((fc,i)=>`
-      <div class="apply-row">
+    applyPending=[...allFC];
+    $alist.innerHTML=applyPending.map((fc,i)=>`
+      <div class="arow">
         <input type="checkbox" id="ac${i}" checked>
         <label for="ac${i}">${fc.isNew?'+ ':'~ '}${fc.path}</label>
-        <span class="badge ${fc.isNew?'badge-new':'badge-edit'}">${fc.isNew?'NEW':'EDIT'}</span>
+        <span class="badge ${fc.isNew?'b-new':'b-edit'}">${fc.isNew?'NEW':'EDIT'}</span>
       </div>`).join('');
-    $applyOv.classList.add('open');
+    $aov.classList.add('open');
   }
-  function closeApply(){$applyOv.classList.remove('open')}
+  function closeApply(){ $aov.classList.remove('open'); }
   function confirmApply(){
-    const sel=applyPending.filter((_,i)=>{const cb=document.getElementById('ac'+i);return cb?.checked});
+    const sel=applyPending.filter((_,i)=>document.getElementById('ac'+i)?.checked);
     closeApply();
-    send2k({type:'apply_all',files:sel});
+    b2k({type:'apply_all', files:sel});
   }
 
-  // Terminal
-  function openTerminal(label){$termO.textContent='';if(label)addTLine(`$ ${label}\n`,'');$term.classList.add('open')}
-  function closeTerm(){$term.classList.remove('open')}
-  function termLine(line,cls){addTLine(line,cls?'t-'+cls:'')}
-  function addTLine(line,cls){
-    const s=document.createElement('span');s.className=cls||'';s.textContent=line;
-    $termO.appendChild(s);$termO.scrollTop=$termO.scrollHeight;
+  // ── Terminal ──────────────────────────────────────────────────
+  function openTerminal(label){
+    $termOut.textContent='';
+    if(label) addTermLine('$ '+label+'\n','ti');
+    $term.classList.add('open');
+    $tdot.classList.remove('err'); $tdot.classList.add('active');
+    document.getElementById('tlabel').textContent='TERMINAL';
   }
-  function termDone(ok,summary){addTLine('\n'+(summary||'')+'.\n',ok?'t-ok':'t-err')}
+  function closeTerm(){ $term.classList.remove('open'); }
+  function termLine(line, cls){ addTermLine(line, cls?'t'+cls:''); }
+  function addTermLine(line, cls){
+    const s=document.createElement('span'); s.className=cls||'';
+    s.textContent=line; $termOut.appendChild(s);
+    $termOut.scrollTop=$termOut.scrollHeight;
+  }
+  function termDone(ok, summary){
+    addTermLine('\n'+(summary||'Done')+'.\n', ok?'tok':'te');
+    $tdot.classList.remove('active');
+    if(!ok) $tdot.classList.add('err');
+  }
 
+  // ── Sys line (status in chat) ────────────────────────────────
   function sysLine(text, isErr){
-    showChat();
-    const wrap=mkWrap();
-    wrap.innerHTML=`<div class="sysline" style="color:${isErr?'var(--red)':'var(--text3)'}">${text}</div>`;
-    $msgs.appendChild(wrap); scrollB();
+    hideWelcome();
+    const w=mkWrap();
+    w.innerHTML=`<div class="sysline" style="color:${isErr?'var(--red)':'var(--text3)'}">${text}</div>`;
+    $msgs.appendChild(w); scrollB(true);
   }
 
-  function setFiles(list){fileList=list||[]}
-  function startStream(){if(!streaming)startAI()}
-
-  function mkWrap(){const d=document.createElement('div');d.className='msg-wrap';return d}
-  function scrollB(){requestAnimationFrame(()=>{$msgs.scrollTop=$msgs.scrollHeight})}
+  // ── Misc ──────────────────────────────────────────────────────
+  function setFiles(list){ fileList=list||[]; }
+  function startStream(){ if(!streaming) startAI(); }
 
   return {
-    send,stop,reset,settings,pickImg,runTests,runBuild,runLint,pf,prefill,
-    onToken,onReason,onComplete,setStatus,setFiles,
-    applyOne,onApplied,onApplyErr,openApply,closeApply,confirmApply,
-    openTerminal,closeTerm,termLine,termDone,
-    addImage,remImg,remFile,
-    selFile,clearMsgs,retry,copyLast,sysLine,startStream
+    send, stop, newChat, settings, pickImg,
+    runTests, runBuild, runLint,
+    pf, prefill,
+    onToken, onReason, onComplete, setStatus, setFiles,
+    applyOne, onApplied, onApplyErr, openApply, closeApply, confirmApply,
+    openTerminal, closeTerm, termLine, termDone,
+    addImage, remImg, remFile, selFile,
+    doClear, retry, copyLast, sysLine, startStream
   };
 })();
-// Alias for Kotlin-side js() calls which use App.xxx()
+
+// Global alias for Kotlin js() calls (App.xxx)
 const App = A;
 </script>
 </body>
