@@ -45,9 +45,10 @@ class ChatToolWindowContent(private val project: Project) {
 
     init {
         if (JBCefApp.isSupported()) {
-            browser      = JBCefBrowser()
-            jsQuery      = JBCefJSQuery.create(browser)
-            contentPanel = browser.component
+            val b        = JBCefBrowser()
+            browser      = b
+            jsQuery      = JBCefJSQuery.create(b)
+            contentPanel = b.component
 
             setupBridge()
             loadUI()

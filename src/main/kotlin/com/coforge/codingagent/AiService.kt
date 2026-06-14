@@ -363,7 +363,7 @@ object AiService {
                     ).joinToString("\n\n===\n\n")
                     plan to fullCtx
                 }
-        }.thenCompose { planAndCtx ->
+        }.thenCompose { planAndCtx: Pair<KimiPlan, String> ->
             val plan    = planAndCtx.first
             val fullCtx = planAndCtx.second
 
@@ -399,7 +399,7 @@ object AiService {
                     }
                 }
             }
-        }.thenCompose { verifiedAndCtx ->
+        }.thenCompose { verifiedAndCtx: Pair<String, String> ->
             val verifiedPlan = verifiedAndCtx.first
             val fullCtx      = verifiedAndCtx.second
 
