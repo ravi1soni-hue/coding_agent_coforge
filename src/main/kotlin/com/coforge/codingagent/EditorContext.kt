@@ -14,8 +14,8 @@ import com.intellij.psi.util.PsiTreeUtil
 
 object EditorContext {
 
-    private const val MAX_CONTEXT_CHARS = 24_000
-    private const val CURSOR_LINES = 80
+    private const val MAX_CONTEXT_CHARS = 40_000  // increased: better coverage for large files
+    private const val CURSOR_LINES = 120           // increased: more code visible around cursor
 
     /**
      * Assembles the full context sent to AI models:
@@ -76,31 +76,95 @@ object EditorContext {
 
     private fun getPsiContext(psiFile: PsiFile, offset: Int): String? {
         val element = psiFile.findElementAt(offset) ?: return null
-
         val parts = mutableListOf<String>()
+        val ext = psiFile.virtualFile?.extension?.lowercase()
 
-        // Enclosing class
-        PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.let { cls ->
-            val superClause = cls.superClass?.name?.let { " : $it" } ?: ""
-            parts.add("class ${cls.name}$superClause")
-        }
-
-        // Enclosing method
-        PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)?.let { method ->
-            val params = method.parameterList.parameters.joinToString(", ") {
-                "${it.name}: ${it.type.presentableText}"
+        when (ext) {
+            "java" -> {
+                // Java PSI — full type info
+                PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.let { cls ->
+                    val superClause = cls.superClass?.name?.let { " : $it" } ?: ""
+                    parts.add("class ${cls.name}$superClause")
+                }
+                PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)?.let { method ->
+                    val params = method.parameterList.parameters.joinToString(", ") {
+                        "${it.name}: ${it.type.presentableText}"
+                    }
+                    parts.add("fun ${method.name}($params)")
+                }
+                val imports = (psiFile as? PsiJavaFile)?.importList?.importStatements
+                    ?.mapNotNull { it.qualifiedName }
+                    ?.filter { isRelevantImport(it) }
+                    ?.take(10)
+                if (!imports.isNullOrEmpty()) parts.add("imports: ${imports.joinToString(", ")}")
             }
-            parts.add("fun ${method.name}($params)")
+            "kt", "kts" -> {
+                // Kotlin: use regex-based extraction (avoids Kotlin PSI version issues)
+                // Also try Java PSI for class context — works for Kotlin classes in IntelliJ
+                PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.let { cls ->
+                    parts.add("class ${cls.name}")
+                }
+                PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)?.let { method ->
+                    parts.add("fun ${method.name}()")
+                }
+                // Regex fallback for top-level funs (not inside a class)
+                if (parts.isEmpty()) {
+                    val text = psiFile.text
+                    val lineNum = psiFile.text.substring(0, offset.coerceAtMost(text.length)).count { it == '\n' }
+                    Regex("""(?:^|\n)\s*(?:class|object|interface|data class)\s+(\w+)""")
+                        .findAll(text).lastOrNull { m -> text.substring(0, m.range.first).count { it == '\n' } <= lineNum }
+                        ?.groupValues?.get(1)?.let { parts.add("class $it") }
+                    Regex("""(?:^|\n)\s*(?:fun|suspend fun)\s+(\w+)\s*\(""")
+                        .findAll(text).lastOrNull { m -> text.substring(0, m.range.first).count { it == '\n' } <= lineNum }
+                        ?.groupValues?.get(1)?.let { parts.add("fun $it()") }
+                }
+                // Kotlin imports — all frameworks
+                psiFile.text.lines().filter { it.startsWith("import ") }.take(20)
+                    .map { it.removePrefix("import ").trim() }
+                    .filter { isRelevantImport(it) }
+                    .take(12)
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { parts.add("imports: ${it.joinToString(", ")}") }
+            }
+            "dart" -> {
+                // Dart: regex-based extraction
+                val text = psiFile.text
+                val lineNum = text.substring(0, offset.coerceAtMost(text.length)).count { it == '\n' }
+                Regex("""(?:^|\n)\s*(?:abstract\s+)?(?:class|mixin|extension)\s+(\w+)""")
+                    .findAll(text).lastOrNull { m -> text.substring(0, m.range.first).count { it == '\n' } <= lineNum }
+                    ?.groupValues?.get(1)?.let { parts.add("class $it") }
+                Regex("""(?:^|\n)\s*(?:Widget|Future|void|String|bool|int)\s+(\w+)\s*\(""")
+                    .findAll(text).lastOrNull { m -> text.substring(0, m.range.first).count { it == '\n' } <= lineNum }
+                    ?.groupValues?.get(1)?.let { parts.add("fun $it()") }
+                text.lines().filter { it.trimStart().startsWith("import ") }.take(15)
+                    .map { it.trim().removePrefix("import ").trim('\'', '"', ';').trim() }
+                    .filter { it.isNotBlank() }
+                    .take(10)
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { parts.add("imports: ${it.joinToString(", ")}") }
+            }
         }
-
-        // Top-level imports (condensed)
-        val imports = (psiFile as? PsiJavaFile)?.importList?.importStatements
-            ?.mapNotNull { it.qualifiedName }
-            ?.filter { it.contains("android") || it.contains("kotlinx") || it.contains("hilt") }
-            ?.take(8)
-        if (!imports.isNullOrEmpty()) parts.add("imports: ${imports.joinToString(", ")}")
 
         return if (parts.isEmpty()) null else parts.joinToString(" | ")
+    }
+
+    private fun isRelevantImport(imp: String): Boolean {
+        val relevant = listOf(
+            "android", "kotlinx", "hilt", "dagger", "javax.inject",
+            "retrofit", "okhttp", "gson", "moshi",
+            "room", "lifecycle", "viewmodel", "livedata",
+            "compose", "material", "navigation", "fragment", "activity",
+            "coroutine", "flow", "channel",
+            "flutter", "dart:", "package:",
+            "riverpod", "bloc", "provider", "getx", "mobx",
+            "dio", "http", "chopper",
+            "go_router", "auto_route",
+            "firebase", "supabase", "amplify",
+            "hive", "sqflite", "drift",
+            "injectable", "get_it"
+        )
+        val impLower = imp.lowercase()
+        return relevant.any { impLower.contains(it) }
     }
 
     // ─── Diagnostics: errors and warnings at cursor region ───────────────────
@@ -146,13 +210,15 @@ object EditorContext {
     private fun getGitContext(project: Project): String? {
         return try {
             val clm = ChangeListManager.getInstance(project)
-            val changes = clm.allChanges.take(10)
+            val allChanges = clm.allChanges
+            val changes = allChanges.take(30)
             if (changes.isEmpty()) return null
             val summary = changes.joinToString("\n") { change ->
                 val type = change.type.name.lowercase()
                 "  $type: ${change.virtualFile?.path?.removePrefix(project.basePath ?: "") ?: "?"}"
             }
-            "Uncommitted changes (${changes.size}):\n$summary"
+            val more = if (allChanges.size > 30) "\n  … ${allChanges.size - 30} more" else ""
+            "Uncommitted changes (${allChanges.size}):\n$summary$more"
         } catch (_: Exception) { null }
     }
 
@@ -165,9 +231,9 @@ object EditorContext {
                 files.add(file.path.removePrefix(project.basePath ?: ""))
             true
         }
-        val listing = files.take(80).joinToString("\n")
-        val extra = if (files.size > 80) "\n  … ${files.size - 80} more files" else ""
-        return "Project source files:\n$listing$extra"
+        val listing = files.take(200).joinToString("\n")
+        val extra = if (files.size > 200) "\n  … ${files.size - 200} more files" else ""
+        return "Project source files (${files.size} total):\n$listing$extra"
     }
 
     // ─── Indexed codebase context (called from background thread, no PSI) ──────

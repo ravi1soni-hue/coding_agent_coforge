@@ -325,19 +325,22 @@ object AiService {
             }
         } catch (_: Exception) { "" }
 
+        // Platform-specific context (manifest, pubspec) — always included
+        val platformCtx = buildPlatformContext(project, info)
+
         // Fetch URLs the user pasted — explicit, not rule-decided
         val urlContext = CompletableFuture.supplyAsync { UrlContentFetcher.fetchAll(userMessage) }
 
-        // ── Step 1: Kimi decides what it needs ───────────────────────────────
+        // ── Step 1: Kimi streams its reasoning live ───────────────────────────
         onStatus("Analyzing request...")
 
-        callModelBlocking(
+        callModelStreaming(
             settings.kimiModel, settings.kimiApiKey,
             kimiPlannerSystem(info, deps, projectRules),
-            buildPlannerPrompt(userMessage, history, context, projectListing)
-        ).thenCompose { kimiRaw ->
+            buildPlannerPrompt(userMessage, history, context, projectListing),
+            emptyList()
+        ) { tok -> onReasoning(tok) }.thenCompose { kimiRaw ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture(kimiRaw)
-            onReasoning(kimiRaw)
 
             val plan = parseKimiPlan(kimiRaw)
 
@@ -357,6 +360,7 @@ object AiService {
                     val urlCtx    = try { urlContext.get() } catch (_: Exception) { "" }
                     val fullCtx   = listOfNotNull(
                         context.takeIf { it.isNotBlank() && it != "No file currently open." },
+                        platformCtx.takeIf { it.isNotBlank() },
                         fileCtx.takeIf { it.isNotBlank() },
                         searchCtx.takeIf { it.isNotBlank() },
                         urlCtx.takeIf { it.isNotBlank() }
@@ -374,16 +378,15 @@ object AiService {
                 return@thenCompose CompletableFuture.completedFuture(plan.rawText to fullCtx)
             }
 
-            // ── Step 3: Gemini verifies plan and fetches any missing files ────
-            // Gap 7: Gemini is now a pre-write verifier, not a plan reviewer
+            // ── Step 3: Gemini streams its verification live ─────────────────
             onStatus("Verifying plan...")
-            callModelBlocking(
+            callModelStreaming(
                 settings.geminiModel, settings.geminiApiKey,
                 geminiVerifierSystem(info, deps, projectRules),
-                buildGeminiVerifyPrompt(userMessage, plan.rawText, fullCtx, history)
-            ).thenCompose { review ->
+                buildGeminiVerifyPrompt(userMessage, plan.rawText, fullCtx, history),
+                emptyList()
+            ) { tok -> onReasoning(tok) }.thenCompose { review ->
                 if (review.isBlank()) return@thenCompose CompletableFuture.completedFuture(plan.rawText to fullCtx)
-                onReasoning("GEMINI VERIFICATION:\n$review")
 
                 // Gap 2: Gemini may flag MISSING_FILES — fetch them and augment context
                 val missingFiles = parseMissingFiles(review)
@@ -503,8 +506,8 @@ object AiService {
         val base = project?.basePath ?: return plan.requestedFiles
         val expanded = plan.requestedFiles.toMutableSet()
 
-        // Scan plan text for paths like lib/foo/bar.dart, app/src/main/.../Foo.kt
-        val filePathRe = Regex("""(?:lib|app|src|android|ios|test|feature|data|domain|presentation)/[\w/\-]+\.(?:dart|kt|java|xml|yaml|gradle|kts)""")
+        // Scan plan text for paths — broad prefix list catches custom project structures
+        val filePathRe = Regex("""(?:lib|app|src|android|ios|test|feature|features|data|domain|presentation|modules|packages|core|shared|common|infrastructure)/[\w/\-]+\.(?:dart|kt|java|xml|yaml|gradle|kts)""")
         filePathRe.findAll(kimiRaw).forEach { m ->
             val path = m.value.trim()
             if (java.io.File("$base/$path").exists()) {
@@ -614,6 +617,7 @@ object AiService {
         changedFiles: List<String>,
         project: Project,
         onStatus: (String) -> Unit,
+        onReasoning: (String) -> Unit = {},
         onToken: (String) -> Unit,
         onComplete: (String) -> Unit
     ) {
@@ -626,7 +630,7 @@ object AiService {
         val fileContents = fetchRequestedFiles(project, changedFiles)
 
         onStatus("Analyzing failures...")
-        callModelBlocking(settings.kimiModel, settings.kimiApiKey,
+        callModelStreaming(settings.kimiModel, settings.kimiApiKey,
             kimiPlannerSystem(info, deps, projectRules),
             """
             ═══ SITUATION ═══
@@ -643,8 +647,9 @@ object AiService {
             ${failureOutput.take(4000)}
 
             Analyze the failures and produce a precise plan to fix ALL of them.
-            """.trimIndent()
-        ).thenCompose { plan ->
+            """.trimIndent(),
+            emptyList()
+        ) { tok -> onReasoning(tok) }.thenCompose { plan ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
             onStatus("Fixing...")
             callModelStreaming(settings.gptModel, settings.gptApiKey,
@@ -666,6 +671,7 @@ object AiService {
         lintOutput: String,
         project: Project,
         onStatus: (String) -> Unit,
+        onReasoning: (String) -> Unit = {},
         onToken: (String) -> Unit,
         onComplete: (String) -> Unit
     ) {
@@ -695,7 +701,7 @@ object AiService {
         val fileContents = fetchRequestedFiles(project, errorPaths)
 
         onStatus("Fixing lint errors...")
-        callModelBlocking(settings.kimiModel, settings.kimiApiKey,
+        callModelStreaming(settings.kimiModel, settings.kimiApiKey,
             kimiPlannerSystem(info, deps, projectRules),
             """
             ═══ SITUATION ═══
@@ -712,8 +718,9 @@ object AiService {
             $errorLines
 
             Produce a precise plan to fix ALL lint errors shown.
-            """.trimIndent()
-        ).thenCompose { plan ->
+            """.trimIndent(),
+            emptyList()
+        ) { tok -> onReasoning(tok) }.thenCompose { plan ->
             if (stopRequested) return@thenCompose CompletableFuture.completedFuture("")
             onStatus("Applying lint fixes...")
             implementWithAgenticRetry(
@@ -731,13 +738,59 @@ object AiService {
     fun getInlineCompletion(prefix: String, suffix: String, language: String): String {
         if (stopRequested) return ""
         val settings = AppSettingsState.instance
-        if (settings.gptApiKey.isBlank()) return ""
+        // Prefer Gemini for ghost-text — significantly lower latency than GPT-5
+        val (model, key) = when {
+            settings.geminiApiKey.isNotBlank() -> settings.geminiModel to settings.geminiApiKey
+            settings.gptApiKey.isNotBlank()    -> settings.gptModel    to settings.gptApiKey
+            else                               -> return ""
+        }
         return try {
-            callModelSync(settings.gptModel, settings.gptApiKey, gptInlineSystem,
+            callModelSync(model, key, gptInlineSystem,
                 "LANGUAGE: $language\nPREFIX:\n$prefix\nSUFFIX:\n$suffix\nCOMPLETION:",
-                timeoutSec = 5, maxTokens = 80)
+                timeoutSec = 4, maxTokens = 80)
                 .take(400)
         } catch (_: Exception) { "" }
+    }
+
+    // ─── Platform-specific context (manifest, pubspec) ────────────────────────
+
+    /**
+     * Always inject AndroidManifest.xml / pubspec.yaml into context.
+     * The AI needs these to register activities, add packages, know minSdk, etc.
+     */
+    private fun buildPlatformContext(project: Project?, info: ProjectTypeDetector.ProjectInfo): String {
+        val base = project?.basePath ?: return ""
+        val sb = StringBuilder()
+        when (info.type) {
+            ProjectTypeDetector.ProjectType.FLUTTER -> {
+                readFileIfExists("$base/pubspec.yaml", 4000)?.let {
+                    sb.append("=== pubspec.yaml ===\n$it\n\n")
+                }
+            }
+            ProjectTypeDetector.ProjectType.ANDROID_NATIVE -> {
+                val manifestPaths = listOf(
+                    "app/src/main/AndroidManifest.xml",
+                    "src/main/AndroidManifest.xml",
+                    "AndroidManifest.xml"
+                )
+                manifestPaths.firstNotNullOfOrNull { readFileIfExists("$base/$it", 3000) }?.let {
+                    sb.append("=== AndroidManifest.xml ===\n$it\n\n")
+                }
+                val gradlePaths = listOf("app/build.gradle.kts", "app/build.gradle")
+                gradlePaths.firstNotNullOfOrNull { readFileIfExists("$base/$it", 2000) }?.let {
+                    sb.append("=== app build.gradle ===\n$it\n\n")
+                }
+            }
+            else -> {}
+        }
+        return sb.toString().trim()
+    }
+
+    private fun readFileIfExists(absolutePath: String, maxChars: Int): String? {
+        return try {
+            val f = java.io.File(absolutePath)
+            if (f.exists() && f.isFile) f.readText(Charsets.UTF_8).take(maxChars) else null
+        } catch (_: Exception) { null }
     }
 
     // ─── Prompt builders ──────────────────────────────────────────────────────
@@ -819,8 +872,8 @@ object AiService {
         fullCtx.takeIf { it.isNotBlank() }?.let { append("═══ PROJECT CONTEXT ═══\n$it\n\n") }
         append("═══ VERIFIED PLAN ═══\n$plan\n\n")
         append("═══ CURRENT REQUEST ═══\n$msg\n\n")
-        append("═══ PREVIOUS RESPONSE (partial — had search failures) ═══\n")
-        append(previousOutput.take(2000))
+        append("═══ PREVIOUS RESPONSE (had search block failures) ═══\n")
+        append(previousOutput)
         append("\n\n")
         append("═══ SEARCH BLOCK FAILURES — ACTUAL FILE CONTENTS ═══\n")
         failures.forEach { failure ->
@@ -839,13 +892,18 @@ object AiService {
 
     // ─── Model callers ────────────────────────────────────────────────────────
 
-    private fun callModelBlocking(model: String, apiKey: String, system: String, user: String): CompletableFuture<String> {
+    private fun callModelBlocking(model: String, apiKey: String, system: String, user: String, retryLeft: Int = 1): CompletableFuture<String> {
         if (apiKey.isBlank()) return CompletableFuture.failedFuture(Exception("API key missing for $model"))
         val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = false))
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-            .thenApply { r ->
-                if (r.statusCode() == 200) parseBlocking(r.body())
-                else throw Exception("HTTP ${r.statusCode()}: ${r.body().take(400)}")
+            .thenCompose { r ->
+                when {
+                    r.statusCode() == 200 -> CompletableFuture.completedFuture(parseBlocking(r.body()))
+                    (r.statusCode() == 429 || r.statusCode() >= 500) && retryLeft > 0 ->
+                        CompletableFuture.supplyAsync { Thread.sleep(1200); "" }
+                            .thenCompose { callModelBlocking(model, apiKey, system, user, retryLeft - 1) }
+                    else -> CompletableFuture.failedFuture(Exception("HTTP ${r.statusCode()}: ${r.body().take(400)}"))
+                }
             }
     }
 
@@ -856,20 +914,30 @@ object AiService {
         if (apiKey.isBlank()) return CompletableFuture.failedFuture(Exception("API key missing for $model"))
         val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = true, images = images), timeoutSec = 180)
         return CompletableFuture.supplyAsync {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofLines())
-            val full = StringBuilder()
-            response.body().forEach { line ->
-                if (stopRequested) return@forEach
-                if (line.startsWith("data: ") && line != "data: [DONE]") {
-                    val delta = parseStreamDelta(line.removePrefix("data: "))
-                    if (delta.isNotEmpty()) { full.append(delta); onToken(delta) }
+            for (attempt in 0..1) {
+                try {
+                    val response = client.send(request, HttpResponse.BodyHandlers.ofLines())
+                    if ((response.statusCode() == 429 || response.statusCode() >= 500) && attempt == 0) {
+                        Thread.sleep(1200); continue
+                    }
+                    val full = StringBuilder()
+                    response.body().forEach { line ->
+                        if (stopRequested) return@forEach
+                        if (line.startsWith("data: ") && line != "data: [DONE]") {
+                            val delta = parseStreamDelta(line.removePrefix("data: "))
+                            if (delta.isNotEmpty()) { full.append(delta); onToken(delta) }
+                        }
+                    }
+                    if (full.isEmpty() && !stopRequested) {
+                        val fb = callModelSync(model, apiKey, system, user, images = images)
+                        onToken(fb); full.append(fb)
+                    }
+                    return@supplyAsync full.toString()
+                } catch (e: Exception) {
+                    if (attempt == 0) Thread.sleep(600)
                 }
             }
-            if (full.isEmpty() && !stopRequested) {
-                val fb = callModelSync(model, apiKey, system, user, images = images)
-                onToken(fb); full.append(fb)
-            }
-            full.toString()
+            ""
         }
     }
 
@@ -879,11 +947,28 @@ object AiService {
     ): String {
         if (apiKey.isBlank()) return ""
         val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = false, images = images, maxTokens = maxTokens), timeoutSec = timeoutSec)
-        val r = client.send(request, HttpResponse.BodyHandlers.ofString())
-        return if (r.statusCode() == 200) parseBlocking(r.body()) else ""
+        for (attempt in 0..1) {
+            try {
+                val r = client.send(request, HttpResponse.BodyHandlers.ofString())
+                if ((r.statusCode() == 429 || r.statusCode() >= 500) && attempt == 0) {
+                    Thread.sleep(1200)
+                    continue
+                }
+                return if (r.statusCode() == 200) parseBlocking(r.body()) else ""
+            } catch (e: Exception) {
+                if (attempt == 0) Thread.sleep(600) else return ""
+            }
+        }
+        return ""
     }
 
     // ─── HTTP helpers ─────────────────────────────────────────────────────────
+
+    private fun modelTemperature(model: String) = when {
+        model.contains("kimi", ignoreCase = true)   -> 0.1   // planning: structured, low-variance
+        model.contains("gemini", ignoreCase = true) -> 0.1   // verification: deterministic
+        else                                        -> 0.35  // GPT: creative code generation
+    }
 
     private fun buildBody(model: String, system: String, user: String, stream: Boolean, images: List<String> = emptyList(), maxTokens: Int? = null): String {
         val userContent = if (images.isEmpty()) user else JsonArray().apply {
@@ -900,7 +985,7 @@ object AiService {
         }
         return gson.toJson(JsonObject().apply {
             addProperty("model", model)
-            addProperty("temperature", 0.2)
+            addProperty("temperature", modelTemperature(model))
             if (stream) addProperty("stream", true)
             if (maxTokens != null) addProperty("max_tokens", maxTokens)
             add("messages", JsonArray().apply {

@@ -43,6 +43,12 @@ class ChatToolWindowContent(private val project: Project) {
     private val browser: JBCefBrowser?
     private val jsQuery: JBCefJSQuery?
 
+    // ── Undo stack: path → original content before last write ─────────────────
+    private val undoStack = ArrayDeque<Map<String, String>>()  // each entry = one apply batch
+
+    // ── In-flight AI request tracking ─────────────────────────────────────────
+    @Volatile private var activeThread: Thread? = null
+
     init {
         if (JBCefApp.isSupported()) {
             val b        = JBCefBrowser()
@@ -93,7 +99,7 @@ class ChatToolWindowContent(private val project: Project) {
     private fun handleJs(msg: JsonObject) {
         when (msg["type"]?.asString) {
             "send"          -> onSend(msg)
-            "stop"          -> AiService.stop()
+            "stop"          -> { AiService.stop(); activeThread?.interrupt() }
             "reset"         -> onReset()
             "retry"         -> onRetry()
             "settings"      -> openSettings()
@@ -102,6 +108,7 @@ class ChatToolWindowContent(private val project: Project) {
             "copy"          -> copy(msg["text"]?.asString ?: "")
             "apply_file"    -> applyFile(msg)
             "apply_all"     -> applyAll(msg)
+            "undo"          -> undoLastApply()
             "run_tests"     -> runTests()
             "run_build"     -> runBuild()
             "run_lint"      -> runLint()
@@ -113,13 +120,27 @@ class ChatToolWindowContent(private val project: Project) {
         val images = msg.getAsJsonArray("images")?.map { it.asString } ?: emptyList()
         val tagged = msg.getAsJsonArray("tagged")?.map { it.asString } ?: emptyList()
 
-        if (history.size >= 100) history.subList(0, 40).clear()
+        // Cancel any in-flight AI request
+        AiService.stop()
+        activeThread?.interrupt()
+
+        // Smart history: keep all recent turns, drop oldest pair when > 80 messages
+        if (history.size >= 80) {
+            // Remove the oldest user+assistant pair
+            val firstUser = history.indexOfFirst { it.role == "user" }
+            if (firstUser >= 0) {
+                history.removeAt(firstUser)
+                val nextAss = history.indexOfFirst { it.role == "assistant" }
+                if (nextAss >= 0) history.removeAt(nextAss)
+            }
+        }
         history.add(Message("user", text))
 
         // Gather PSI context on a pooled thread with a read action.
         // PSI / ProjectFileIndex APIs throw if called without a read lock
         // (the CEF callback thread doesn't hold one).
         ApplicationManager.getApplication().executeOnPooledThread {
+            activeThread = Thread.currentThread()
             val taggedVfs: List<VirtualFile> = try {
                 ApplicationManager.getApplication().runReadAction<List<VirtualFile>> {
                     EditorContext.getAllProjectFiles(project).filter { it.name in tagged }
@@ -144,6 +165,7 @@ class ChatToolWindowContent(private val project: Project) {
                 onComplete  = { full ->
                     history.add(Message("assistant", full))
                     push("complete", full)
+                    activeThread = null
                 }
             )
         }
@@ -174,14 +196,36 @@ class ChatToolWindowContent(private val project: Project) {
         val content = msg["content"]?.asString ?: return
         val isNew   = msg["is_new"]?.asBoolean ?: false
         val search  = msg["search"]?.asString?.takeIf { it.isNotBlank() }
-        WriteCommandAction.runWriteCommandAction(project) {
-            try {
-                writeFile(path, content, isNew, search)
-                pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
-                // Gap 4: auto-verify after every single-file apply
-                SwingUtilities.invokeLater { autoVerify(listOf(path)) }
-            } catch (e: Exception) {
-                pushRaw("""{"type":"apply_err","path":${gson.toJson(path)},"msg":${gson.toJson(e.message)}}""")
+
+        // Show diff preview before writing
+        ApplicationManager.getApplication().invokeAndWait {
+            val base = project.basePath ?: return@invokeAndWait
+            val file = java.io.File("$base/$path")
+            val oldContent = if (file.exists()) file.readText(Charsets.UTF_8) else ""
+            val newContent = if (search != null) oldContent.let { cur ->
+                val norm = cur.lines().joinToString("\n") { it.trimEnd() }
+                val normSearch = search.lines().joinToString("\n") { it.trimEnd() }
+                val idx = norm.indexOf(normSearch)
+                if (idx >= 0) cur.substring(0, idx) + content + cur.substring(idx + normSearch.length)
+                else cur.replaceFirst(search, content)
+            } else content
+
+            val dlg = DiffPreviewDialog(project, path, oldContent, newContent, isNew)
+            if (!dlg.showAndGet()) {
+                pushRaw("""{"type":"apply_skip","path":${gson.toJson(path)}}""")
+                return@invokeAndWait
+            }
+
+            WriteCommandAction.runWriteCommandAction(project) {
+                try {
+                    val snap = if (file.exists()) mapOf(path to oldContent) else mapOf(path to "")
+                    writeFile(path, content, isNew, search)
+                    undoStack.addLast(snap)
+                    if (undoStack.size > 20) undoStack.removeFirst()
+                    pushRaw("""{"type":"applied","path":${gson.toJson(path)},"can_undo":true}""")
+                } catch (e: Exception) {
+                    pushRaw("""{"type":"apply_err","path":${gson.toJson(path)},"msg":${gson.toJson(e.message)}}""")
+                }
             }
         }
     }
@@ -189,6 +233,8 @@ class ChatToolWindowContent(private val project: Project) {
     private fun applyAll(msg: JsonObject) {
         val files = msg.getAsJsonArray("files") ?: return
         val applied = mutableListOf<String>()
+        val batchSnap = mutableMapOf<String, String>()  // undo snapshot for entire batch
+
         WriteCommandAction.runWriteCommandAction(project) {
             files.forEach { el ->
                 val o       = el.asJsonObject
@@ -197,6 +243,12 @@ class ChatToolWindowContent(private val project: Project) {
                 val isNew   = o["isNew"]?.asBoolean  ?: false
                 val search  = o["search"]?.asString?.takeIf { it.isNotBlank() }
                 try {
+                    // Snapshot before overwrite for batch undo
+                    val base = project.basePath ?: ""
+                    val existingFile = java.io.File("$base/$path")
+                    if (existingFile.exists()) batchSnap[path] = existingFile.readText(Charsets.UTF_8)
+                    else batchSnap[path] = ""
+
                     writeFile(path, content, isNew, search)
                     applied.add(path)
                     pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
@@ -205,13 +257,50 @@ class ChatToolWindowContent(private val project: Project) {
                 }
             }
         }
-        // Gap 4: auto-verify runs analyze/lint immediately after batch apply
-        if (applied.isNotEmpty()) SwingUtilities.invokeLater { autoVerify(applied) }
+
+        if (applied.isNotEmpty()) {
+            undoStack.addLast(batchSnap)
+            if (undoStack.size > 10) undoStack.removeFirst()
+            pushRaw("""{"type":"batch_applied","count":${applied.size},"can_undo":true}""")
+            // Run verify only after batch apply — not after single file
+            SwingUtilities.invokeLater { autoVerify(applied) }
+        }
     }
 
     /**
-     * Gap 4: Auto-verify — run flutter analyze / lint after every apply.
-     * Streams output to terminal. If errors found, triggers AI auto-fix via fixLintErrors.
+     * Undo the last apply (or batch apply). Restores each file to its pre-apply content.
+     */
+    private fun undoLastApply() {
+        val snap = undoStack.removeLastOrNull() ?: run {
+            push("status", "Nothing to undo")
+            return
+        }
+        WriteCommandAction.runWriteCommandAction(project) {
+            snap.forEach { (path, oldContent) ->
+                try {
+                    val base = project.basePath ?: return@forEach
+                    val file = java.io.File("$base/$path")
+                    if (oldContent.isEmpty()) {
+                        // File was new — delete it
+                        file.delete()
+                        com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                            .refreshAndFindFileByIoFile(file)
+                    } else {
+                        val vf = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                            .refreshAndFindFileByIoFile(file)
+                        val doc = vf?.let { FileDocumentManager.getInstance().getDocument(it) }
+                        doc?.setText(oldContent)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        push("status", "Undone ✓")
+        js("""App.sysLine("↩️ Last apply undone (${snap.size} file(s) restored)")""")
+    }
+
+    /**
+     * Auto-verify — runs analyze/lint after BATCH apply only (never single-file).
+     * If errors found, triggers AI auto-fix. Does NOT add to conversation history.
      */
     private fun autoVerify(changedPaths: List<String>) {
         push("status", "Verifying changes...")
@@ -226,19 +315,21 @@ class ChatToolWindowContent(private val project: Project) {
             if (ok) {
                 push("status", "All checks pass ✓")
                 js("""App.sysLine("✅ Auto-verify passed")""")
-                // Also run tests after successful verify
                 startTestLoop(changedPaths, 1)
             } else {
                 js("""App.sysLine("⚠️ Issues found — AI fixing..."); App.startStream()""")
-                history.add(Message("user", "[auto-verify] Fix lint/analyze errors after apply"))
+                // Do NOT add to history — this is an internal system action, not user turn
                 AiService.fixLintErrors(
                     lintOutput  = out,
                     project     = project,
                     onStatus    = { s   -> push("status", s) },
+                    onReasoning = { r   -> push("reasoning", r) },
                     onToken     = { tok -> push("token", tok) },
                     onComplete  = { full ->
-                        history.add(Message("assistant", full))
-                        push("complete", full)
+                        if (full.isNotBlank()) {
+                            history.add(Message("assistant", "[auto-fix] $full"))
+                            push("complete", full)
+                        }
                     }
                 )
             }
@@ -358,8 +449,9 @@ class ChatToolWindowContent(private val project: Project) {
                     AiService.fixTestFailures(
                         failureOutput = r.output.takeLast(4000),
                         changedFiles  = changed, project = project,
-                        onStatus  = { s   -> push("status", s) },
-                        onToken   = { tok -> push("token", tok) },
+                        onStatus    = { s   -> push("status", s) },
+                        onReasoning = { r2  -> push("reasoning", r2) },
+                        onToken     = { tok -> push("token", tok) },
                         onComplete = { full ->
                             history.add(Message("assistant", full))
                             push("complete", full)

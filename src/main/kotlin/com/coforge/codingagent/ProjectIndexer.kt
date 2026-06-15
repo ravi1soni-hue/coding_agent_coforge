@@ -269,7 +269,7 @@ object ProjectIndexer {
     )
 
     /** Expand a set of query words with semantic synonyms from concept groups. */
-    private fun expandWithConcepts(words: Set<String>): Set<String> {
+    fun expandWithConcepts(words: Set<String>): Set<String> {
         val expanded = words.toMutableSet()
         words.forEach { word ->
             CONCEPT_GROUPS.forEach { group ->

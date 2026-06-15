@@ -38,6 +38,19 @@ object CodebaseGraph {
     private val IMPORT_DART  = Regex("""^import\s+'[^']*?([a-z_]+\.dart)'""", RegexOption.MULTILINE)
     private val IDENT        = Regex("""\b([A-Z][a-zA-Z0-9]{2,})\b""")
 
+    // Common Pascal-case words that are NOT useful for cross-file graph linking
+    private val IDENT_STOP = setOf(
+        "String","Int","Long","Double","Float","Boolean","Unit","Any","Nothing",
+        "List","Map","Set","Pair","Triple","Array","Collection","Sequence",
+        "View","Text","Button","Column","Row","Box","Spacer","Modifier","Image","Icon","Card",
+        "Widget","State","Build","Context","Result","Error","Exception","Throwable",
+        "Companion","Object","Data","Null","True","False","This","Super","Init","Override",
+        "Log","Tag","Runnable","Thread","Handler","Bundle","Intent","Activity","Fragment",
+        "ViewModel","Repository","UseCase","Mapper","Dto","Response","Request","Model",
+        "Future","Stream","Completer","Duration","DateTime","Timer",
+        "BuildContext","StatefulWidget","StatelessWidget","Key","GlobalKey"
+    )
+
     // ─── Public API ───────────────────────────────────────────────────────────
 
     fun build(project: Project): GraphData {
@@ -67,25 +80,28 @@ object CodebaseGraph {
 
         val scoreMap = mutableMapOf<String, Int>()
 
-        // Keyword scoring from query tokens
-        val words = tokenize(query)
+        // Keyword scoring — uses concept-expanded words for better recall
+        val baseWords = tokenize(query)
+        val words = ProjectIndexer.expandWithConcepts(baseWords)
         indexEntries.values.forEach { entry ->
             var s = 0
             val pathLow = entry.relativePath.lowercase()
             val fileName = pathLow.substringAfterLast("/")
             words.forEach { w ->
-                if (fileName.contains(w)) s += 10
-                else if (pathLow.contains(w)) s += 4
+                val isBase = w in baseWords
+                if (fileName.contains(w)) s += if (isBase) 10 else 4
+                else if (pathLow.contains(w)) s += if (isBase) 4 else 2
             }
             val symsLow = entry.symbols.map { it.lowercase() }
             words.forEach { w ->
+                val isBase = w in baseWords
                 symsLow.forEach { sym ->
-                    if (sym == w) s += 12
-                    else if (sym.contains(w)) s += 5
+                    if (sym == w) s += if (isBase) 12 else 5
+                    else if (sym.contains(w)) s += if (isBase) 5 else 2
                 }
             }
             val cLow = entry.content.lowercase()
-            words.forEach { w -> if (cLow.contains(w)) s += 2 }
+            words.forEach { w -> if (cLow.contains(w)) s += if (w in baseWords) 2 else 1 }
             if (s > 0) scoreMap[entry.relativePath] = (scoreMap[entry.relativePath] ?: 0) + s
         }
 
@@ -101,16 +117,26 @@ object CodebaseGraph {
             }
         }
 
-        // Also traverse one level deep for the top definition file:
-        // if the user mentions "LoginViewModel", include what LoginViewModel imports too
-        scoreMap.entries
-            .sortedByDescending { it.value }
-            .take(3)
+        // Two-level dependency traversal:
+        // Level 1 — what do the top-scoring files import?
+        val level1Paths = scoreMap.entries.sortedByDescending { it.value }.take(4)
             .mapNotNull { (path, _) -> graph.nodes[path] }
-            .forEach { node ->
-                node.importedSymbols.forEach { sym ->
-                    graph.symbolDefinedIn[sym]?.let { depPath ->
-                        scoreMap[depPath] = (scoreMap[depPath] ?: 0) + 6
+        level1Paths.forEach { node ->
+            node.importedSymbols.forEach { sym ->
+                graph.symbolDefinedIn[sym]?.let { depPath ->
+                    scoreMap[depPath] = (scoreMap[depPath] ?: 0) + 6
+                }
+            }
+        }
+        // Level 2 — what do those level-1 dependencies import?
+        level1Paths.flatMap { node -> node.importedSymbols }
+            .mapNotNull { graph.symbolDefinedIn[it] }
+            .distinct()
+            .mapNotNull { graph.nodes[it] }
+            .forEach { depNode ->
+                depNode.importedSymbols.forEach { sym ->
+                    graph.symbolDefinedIn[sym]?.let { dep2Path ->
+                        scoreMap[dep2Path] = (scoreMap[dep2Path] ?: 0) + 3
                     }
                 }
             }
@@ -158,7 +184,7 @@ object CodebaseGraph {
             val exported = entry.symbols.toSet()
             val referenced = IDENT.findAll(entry.content)
                 .map { it.groupValues[1] }
-                .filter { it !in exported }  // exclude self-definitions
+                .filter { it !in exported && it !in IDENT_STOP }
                 .toSet()
 
             nodes[entry.relativePath] = Node(entry.relativePath, exported, imported, referenced)
@@ -195,11 +221,17 @@ object CodebaseGraph {
         return reasons.distinct().take(2).joinToString(", ")
     }
 
+    private val GRAPH_STOP = setOf(
+        "the","and","for","with","this","that","from","have","has","use","used","new",
+        "get","set","val","var","fun","class","def","null","true","false","void",
+        "override","return","import","package","private","public","protected","internal"
+    )
+
     private fun tokenize(text: String): Set<String> =
         text.replace(Regex("([a-z])([A-Z])"), "$1 $2")
             .lowercase()
             .split(Regex("[^a-zA-Z0-9_]+"))
-            .filter { it.length > 2 }
+            .filter { it.length > 2 && it !in GRAPH_STOP }
             .toSet()
 
     private fun empty() = GraphData(emptyMap(), emptyMap(), emptyMap())

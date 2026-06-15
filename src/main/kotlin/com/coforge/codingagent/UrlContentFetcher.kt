@@ -23,6 +23,16 @@ object UrlContentFetcher {
             .build()
     }
 
+    // TTL cache: URL -> (content, fetchTime). TTL = 5 minutes.
+    private data class CacheEntry(val result: FetchResult, val fetchedAt: Long)
+    private val urlCache = object : LinkedHashMap<String, CacheEntry>(32, 0.75f, true) {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, CacheEntry>) = size > 50
+    }
+    private const val CACHE_TTL_MS = 5 * 60 * 1000L  // 5 minutes
+
+    // Per-domain rate limiting: track last request time
+    private val domainLastRequest = mutableMapOf<String, Long>()
+
     data class FetchResult(
         val url: String,
         val title: String,
@@ -67,6 +77,22 @@ object UrlContentFetcher {
     }
 
     fun fetch(url: String, timeoutSec: Long = 12): FetchResult {
+        // Check TTL cache first
+        synchronized(urlCache) {
+            urlCache[url]?.let { entry ->
+                if (System.currentTimeMillis() - entry.fetchedAt < CACHE_TTL_MS) return entry.result
+            }
+        }
+
+        // Per-domain rate limit: max 1 request/second per domain
+        val domain = try { URI.create(url).host ?: url } catch (_: Exception) { url }
+        synchronized(domainLastRequest) {
+            val last = domainLastRequest[domain] ?: 0L
+            val sinceLastMs = System.currentTimeMillis() - last
+            if (sinceLastMs < 1000) Thread.sleep(1000 - sinceLastMs)
+            domainLastRequest[domain] = System.currentTimeMillis()
+        }
+
         val type = detectType(url)
         val html = fetchRaw(url, timeoutSec)
             ?: return FetchResult(url, "Could not fetch", "Failed to retrieve content.", type)
@@ -83,7 +109,9 @@ object UrlContentFetcher {
             SourceType.GENERAL        -> extractGeneral(html)
         }.take(8000).trim()
 
-        return FetchResult(url, title, content, type)
+        val result = FetchResult(url, title, content, type)
+        synchronized(urlCache) { urlCache[url] = CacheEntry(result, System.currentTimeMillis()) }
+        return result
     }
 
     // ─── URL type detection ───────────────────────────────────────────────────
