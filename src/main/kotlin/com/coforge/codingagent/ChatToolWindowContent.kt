@@ -589,9 +589,12 @@ class ChatToolWindowContent(private val project: Project) {
         }
         val escaped = buildString {
             for (c in line) when (c) {
-                '\\' -> append("\\\\"); '\'' -> append("\\'")
-                '\n' -> append("\\n");  '\r' -> append("\\r")
-                '\t' -> append("\\t");  else -> append(c)
+                '\\' -> append("\\\\")
+                '\'' -> append("\\'")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(c)
             }
         }
         js("App.termLine('$escaped','$cls')")
@@ -651,9 +654,12 @@ class ChatToolWindowContent(private val project: Project) {
     fun prefillAndSend(prompt: String) {
         val esc = buildString {
             for (c in prompt) when (c) {
-                '\\' -> append("\\\\"); '\'' -> append("\\'")
-                '\n' -> append("\\n");  '\r' -> append("\\r")
-                '\t' -> append("\\t");  else -> append(c)
+                '\\' -> append("\\\\")
+                '\'' -> append("\\'")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(c)
             }
         }
         js("App.prefill('$esc')")
