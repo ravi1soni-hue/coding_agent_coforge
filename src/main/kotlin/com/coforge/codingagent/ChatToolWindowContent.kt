@@ -480,6 +480,7 @@ class ChatToolWindowContent(private val project: Project) {
                         onToken     = { tok -> push("token", tok) },
                         onComplete = { full ->
                             history.add(Message("assistant", full))
+                            ProjectHistoryService.getInstance(project).save(project, history)
                             push("complete", full)
                             val fixes = parseChanges(full)
                             if (fixes.isEmpty()) { js("""App.sysLine("⚠️ No fix returned.")"""); return@fixTestFailures }
@@ -512,7 +513,11 @@ class ChatToolWindowContent(private val project: Project) {
                 onStatus    = { s   -> push("status", s) },
                 onReasoning = { _   -> },
                 onToken     = { tok -> push("token", tok) },
-                onComplete  = { full -> history.add(Message("assistant", full)); push("complete", full) }
+                onComplete  = { full ->
+                    history.add(Message("assistant", full))
+                    ProjectHistoryService.getInstance(project).save(project, history)
+                    push("complete", full)
+                }
             )
         }
     }
@@ -582,7 +587,13 @@ class ChatToolWindowContent(private val project: Project) {
             line.contains("success", true)-> "ok"
             else -> ""
         }
-        val escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+        val escaped = buildString {
+            for (c in line) when (c) {
+                '\\' -> append("\\\\"); '\'' -> append("\\'")
+                '\n' -> append("\\n");  '\r' -> append("\\r")
+                '\t' -> append("\\t");  else -> append(c)
+            }
+        }
         js("App.termLine('$escaped','$cls')")
     }
 
@@ -638,7 +649,13 @@ class ChatToolWindowContent(private val project: Project) {
 
     // Public API for QuickActionsGroup
     fun prefillAndSend(prompt: String) {
-        val esc = prompt.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+        val esc = buildString {
+            for (c in prompt) when (c) {
+                '\\' -> append("\\\\"); '\'' -> append("\\'")
+                '\n' -> append("\\n");  '\r' -> append("\\r")
+                '\t' -> append("\\t");  else -> append(c)
+            }
+        }
         js("App.prefill('$esc')")
     }
 

@@ -698,8 +698,10 @@ window.onK = raw => {
       case 'file_list': A.setFiles(m.data);          break;
       case 'term_line': A.termLine(m.data, m.cls);   break;
       case 'term_done': A.termDone(m.ok, m.summary); break;
-      case 'applied':   A.onApplied(m.path);         break;
-      case 'apply_err': A.onApplyErr(m.path, m.msg); break;
+      case 'applied':       A.onApplied(m.path, m.can_undo);  break;
+      case 'apply_err':    A.onApplyErr(m.path, m.msg);      break;
+      case 'apply_skip':   A.sysLine('⊚ Skipped: ' + m.path); break;
+      case 'batch_applied': A.onBatchApplied(m.count, m.can_undo); break;
       case 'reset':     A.doClear();                 break;
     }
   }catch(e){console.error('onK parse error',e)}
@@ -943,7 +945,7 @@ const A = (() => {
   function renderPop(){
     const filtered = fileList.filter(n=>n.toLowerCase().includes(fileQ)).slice(0,14);
     if(!filtered.length){ closePop(); return; }
-    $fpop.innerHTML = filtered.map((n,i)=>`<div class="fi${i===0?' sel':''}" onmousedown="A.selFile('${n.replace(/'/g,"&#39;")}',event)"><span class="fi-ico">📄</span>${n}</div>`).join('');
+    $fpop.innerHTML = filtered.map((n,i)=>`<div class="fi${i===0?' sel':''}" data-name="${n.replace(/"/g,'&quot;')}" onmousedown="A.selFile('${n.replace(/'/g,"&#39;")}',event)"><span class="fi-ico">📄</span>${n}</div>`).join('');
     $fpop.classList.add('open'); filePicking = true;
   }
   function closePop(){ $fpop.classList.remove('open'); filePicking = false; }
@@ -952,7 +954,7 @@ const A = (() => {
     let sel=items.findIndex(el=>el.classList.contains('sel'));
     if(e.key==='ArrowDown'){ e.preventDefault(); sel=(sel+1)%items.length; }
     else if(e.key==='ArrowUp'){ e.preventDefault(); sel=(sel-1+items.length)%items.length; }
-    else if(e.key==='Enter'){ e.preventDefault(); const s=$fpop.querySelector('.sel'); if(s) selFile(s.querySelector('span+')?.textContent??s.textContent.trim(),e); return; }
+    else if(e.key==='Enter'){ e.preventDefault(); const s=$fpop.querySelector('.sel'); if(s) selFile(s.dataset.name||s.textContent.replace('📄','').trim(),e); return; }
     else if(e.key==='Escape'){ closePop(); return; }
     items.forEach((el,i)=>el.classList.toggle('sel',i===sel));
   }
@@ -961,6 +963,7 @@ const A = (() => {
     if(e) e.preventDefault();
     const v=$inp.value, c=$inp.selectionStart, ai=v.slice(0,c).lastIndexOf('@');
     $inp.value = v.slice(0,ai)+v.slice(c);
+    $inp.setSelectionRange(ai, ai);
     closePop(); addFilePill(name); $inp.focus();
     b2k({type:'tag_file',name});
   }
@@ -1249,8 +1252,12 @@ const A = (() => {
 
   function retry(){ b2k({type:'retry'}); }
   function copyLast(){
-    if(navigator.clipboard) navigator.clipboard.writeText(streamRaw).catch(()=>b2k({type:'copy',text:streamRaw}));
-    else b2k({type:'copy',text:streamRaw});
+    const clean=streamRaw
+      .replace(/<file_change\s[^>]*>[\s\S]*?<\/file_change>/g,'')
+      .replace(/<new_file\s[^>]*>[\s\S]*?<\/new_file>/g,'')
+      .trim();
+    if(navigator.clipboard) navigator.clipboard.writeText(clean).catch(()=>b2k({type:'copy',text:clean}));
+    else b2k({type:'copy',text:clean});
   }
 
   // ── Apply files ───────────────────────────────────────────────
@@ -1260,8 +1267,12 @@ const A = (() => {
     if(btn){btn.textContent='Applying…';btn.classList.add('done');}
     b2k({type:'apply_file', path:el._fc.path, content:el._fc.content, is_new:el._fc.isNew, search:el._fc.search||null});
   }
-  function onApplied(path){
-    sysLine(`✓ Applied: ${path}`);
+  function onApplied(path, canUndo){
+    const safe=path.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const undoHtml=canUndo?` <button class="mact" onclick="A.undo()" style="cursor:pointer">↩ Undo</button>`:'';
+    const w=mkWrap();
+    w.innerHTML=`<div class="sysline" style="display:flex;align-items:center;gap:4px">✓ Applied: ${safe}${undoHtml}</div>`;
+    $msgs.appendChild(w); scrollB(true);
     document.querySelectorAll('.fc').forEach(el=>{
       if(el._fc?.path===path){
         const b=el.querySelector('.fcbtn-apply');
@@ -1269,6 +1280,13 @@ const A = (() => {
       }
     });
   }
+  function onBatchApplied(count, canUndo){
+    const undoHtml=canUndo?` <button class="mact" onclick="A.undo()" style="cursor:pointer">↩ Undo</button>`:'';
+    const w=mkWrap();
+    w.innerHTML=`<div class="sysline" style="display:flex;align-items:center;gap:4px">✓ Applied ${count} file(s)${undoHtml}</div>`;
+    $msgs.appendChild(w); scrollB(true);
+  }
+  function undo(){ b2k({type:'undo'}); }
   function onApplyErr(path,msg){ sysLine(`✗ ${path}: ${msg}`, true); }
 
   function openApply(){
@@ -1327,7 +1345,7 @@ const A = (() => {
     runTests, runBuild, runLint,
     pf, prefill,
     onToken, onReason, onComplete, setStatus, setFiles,
-    applyOne, onApplied, onApplyErr, openApply, closeApply, confirmApply,
+    applyOne, onApplied, onBatchApplied, undo, onApplyErr, openApply, closeApply, confirmApply,
     openTerminal, closeTerm, termLine, termDone,
     addImage, remImg, remFile, selFile,
     doClear, retry, copyLast, sysLine, startStream

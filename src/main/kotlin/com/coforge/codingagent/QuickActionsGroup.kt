@@ -51,7 +51,7 @@ class QuickActionsGroup : ActionGroup(), DumbAware {
                 "write comprehensive tests (flutter_test) covering all functions and edge cases in this file:\n\n"
             else
                 "write comprehensive unit tests (JUnit5 + MockK) covering all functions and edge cases in this file:\n\n"),
-            AnAction.EMPTY_ACTION,  // separator placeholder
+            Separator.create(),
             object : AnAction("Generate Commit Message"), DumbAware {
                 override fun getActionUpdateThread() = ActionUpdateThread.EDT
                 override fun actionPerformed(e: AnActionEvent) {

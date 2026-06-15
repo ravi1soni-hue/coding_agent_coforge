@@ -176,22 +176,5 @@ object WebSearchService {
         }
     }
 
-    private fun cleanDocHtml(html: String): String =
-        html.replace(Regex("<script[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<style[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<nav[\\s\\S]*?</nav>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<header[\\s\\S]*?</header>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<footer[\\s\\S]*?</footer>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<p[^>]*>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<li[^>]*>", RegexOption.IGNORE_CASE), "\n• ")
-            .replace(Regex("<h[1-4][^>]*>", RegexOption.IGNORE_CASE), "\n## ")
-            .replace(Regex("<[^>]+>"), "")
-            .replace(Regex("&amp;"), "&").replace("&lt;", "<").replace("&gt;", ">")
-            .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
-            .replace(Regex("\\n{3,}"), "\n\n")
-            .replace(Regex("[ \\t]{2,}"), " ")
-            .trim()
-
     private fun JsonObject.getStr(key: String) = try { get(key)?.asString } catch (_: Exception) { null }
 }

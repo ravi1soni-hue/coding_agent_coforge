@@ -900,21 +900,6 @@ object AiService {
 
     // ─── Model callers ────────────────────────────────────────────────────────
 
-    private fun callModelBlocking(model: String, apiKey: String, system: String, user: String, retryLeft: Int = 1): CompletableFuture<String> {
-        if (apiKey.isBlank()) return CompletableFuture.failedFuture(Exception("API key missing for $model"))
-        val request = buildHttpRequest(apiKey, buildBody(model, system, user, stream = false))
-        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-            .thenCompose { r ->
-                when {
-                    r.statusCode() == 200 -> CompletableFuture.completedFuture(parseBlocking(r.body()))
-                    (r.statusCode() == 429 || r.statusCode() >= 500) && retryLeft > 0 ->
-                        CompletableFuture.supplyAsync { Thread.sleep(1200); "" }
-                            .thenCompose { callModelBlocking(model, apiKey, system, user, retryLeft - 1) }
-                    else -> CompletableFuture.failedFuture(Exception("HTTP ${r.statusCode()}: ${r.body().take(400)}"))
-                }
-            }
-    }
-
     private fun callModelStreaming(
         model: String, apiKey: String, system: String, user: String,
         images: List<String> = emptyList(), onToken: (String) -> Unit
