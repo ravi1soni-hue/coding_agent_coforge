@@ -700,7 +700,7 @@ window.onK = raw => {
       case 'term_done': A.termDone(m.ok, m.summary); break;
       case 'applied':       A.onApplied(m.path, m.can_undo);  break;
       case 'apply_err':    A.onApplyErr(m.path, m.msg);      break;
-      case 'apply_skip':   A.sysLine('⊚ Skipped: ' + m.path); break;
+      case 'apply_skip':   A.sysLine('⊚ Skipped: ' + (m.path||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')); break;
       case 'batch_applied': A.onBatchApplied(m.count, m.can_undo); break;
       case 'reset':     A.doClear();                 break;
     }
@@ -1250,7 +1250,11 @@ const A = (() => {
     setSending(false); setStatus('');
   }
 
-  function retry(){ b2k({type:'retry'}); }
+  function retry(){
+    setSending(true);
+    $typing.classList.add('show');
+    b2k({type:'retry'});
+  }
   function copyLast(){
     const clean=streamRaw
       .replace(/<file_change\s[^>]*>[\s\S]*?<\/file_change>/g,'')
@@ -1287,7 +1291,10 @@ const A = (() => {
     $msgs.appendChild(w); scrollB(true);
   }
   function undo(){ b2k({type:'undo'}); }
-  function onApplyErr(path,msg){ sysLine(`✗ ${path}: ${msg}`, true); }
+  function onApplyErr(path,msg){
+    const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    sysLine(`✗ ${esc(path)}: ${esc(msg)}`, true);
+  }
 
   function openApply(){
     applyPending=[...allFC];

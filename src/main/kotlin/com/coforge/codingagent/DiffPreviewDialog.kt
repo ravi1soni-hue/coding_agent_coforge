@@ -125,27 +125,34 @@ class DiffPreviewDialog(
         val newLines = new.lines()
         if (isNew) return newLines.map { DiffLine(DiffLine.Type.ADDED, it) }
 
-        // LCS-based diff
+        // Guard: skip LCS for very large files to avoid O(n²) memory + time.
+        // Show simplified diff instead (won't have context lines, but won't OOM).
+        if (oldLines.size > 2000 || newLines.size > 2000) {
+            val result = mutableListOf<DiffLine>()
+            oldLines.forEach { result.add(DiffLine(DiffLine.Type.REMOVED, it)) }
+            newLines.forEach { result.add(DiffLine(DiffLine.Type.ADDED, it)) }
+            return result.take(200)
+        }
+
+        // LCS-based diff — iterative backtrack (avoids StackOverflow on large files)
         val lcs = lcsMatrix(oldLines, newLines)
         val result = mutableListOf<DiffLine>()
-
-        fun backtrack(i: Int, j: Int) {
+        var i = oldLines.size
+        var j = newLines.size
+        while (i > 0 || j > 0) {
             when {
                 i > 0 && j > 0 && oldLines[i - 1] == newLines[j - 1] -> {
-                    backtrack(i - 1, j - 1)
-                    result.add(DiffLine(DiffLine.Type.CONTEXT, oldLines[i - 1]))
+                    result.add(DiffLine(DiffLine.Type.CONTEXT, oldLines[i - 1])); i--; j--
                 }
                 j > 0 && (i == 0 || lcs[i][j - 1] >= lcs[i - 1][j]) -> {
-                    backtrack(i, j - 1)
-                    result.add(DiffLine(DiffLine.Type.ADDED, newLines[j - 1]))
+                    result.add(DiffLine(DiffLine.Type.ADDED, newLines[j - 1])); j--
                 }
-                i > 0 && (j == 0 || lcs[i][j - 1] < lcs[i - 1][j]) -> {
-                    backtrack(i - 1, j)
-                    result.add(DiffLine(DiffLine.Type.REMOVED, oldLines[i - 1]))
+                else -> {
+                    result.add(DiffLine(DiffLine.Type.REMOVED, oldLines[i - 1])); i--
                 }
             }
         }
-        backtrack(oldLines.size, newLines.size)
+        result.reverse()
 
         // Collapse unchanged runs to 3-line context windows
         return collapseContext(result, contextLines = 3)
