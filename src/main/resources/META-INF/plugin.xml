@@ -39,6 +39,12 @@
         <codeInsight.inlineCompletion.provider
                 implementation="com.coforge.codingagent.AiInlineCompletionProvider"/>
 
+        <!-- Persistent chat history per project -->
+        <projectService serviceImplementation="com.coforge.codingagent.ProjectHistoryService"/>
+
+        <!-- Incremental index invalidation on file save -->
+        <vfs.asyncListener implementation="com.coforge.codingagent.FileChangeListener"/>
+
     </extensions>
 
     <actions>

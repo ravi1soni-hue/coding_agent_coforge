@@ -18,25 +18,28 @@ class AppSettingsConfigurable : Configurable {
     override fun isModified(): Boolean {
         val s = AppSettingsState.instance
         val c = component ?: return false
-        return c.kimiKeyText != s.kimiApiKey || c.kimiModelText != s.kimiModel ||
-               c.geminiKeyText != s.geminiApiKey || c.geminiModelText != s.geminiModel ||
-               c.gptKeyText != s.gptApiKey || c.gptModelText != s.gptModel
+        return c.kimiKeyText    != s.kimiApiKey    || c.kimiModelText    != s.kimiModel    ||
+               c.geminiKeyText  != s.geminiApiKey  || c.geminiModelText  != s.geminiModel  ||
+               c.gptKeyText     != s.gptApiKey     || c.gptModelText     != s.gptModel     ||
+               c.inlineEnabled  != s.inlineCompletionsEnabled
     }
 
     override fun apply() {
         val s = AppSettingsState.instance
         val c = component ?: return
-        s.kimiApiKey = c.kimiKeyText; s.kimiModel = c.kimiModelText
-        s.geminiApiKey = c.geminiKeyText; s.geminiModel = c.geminiModelText
-        s.gptApiKey = c.gptKeyText; s.gptModel = c.gptModelText
+        s.kimiApiKey   = c.kimiKeyText;    s.kimiModel   = c.kimiModelText
+        s.geminiApiKey = c.geminiKeyText;  s.geminiModel = c.geminiModelText
+        s.gptApiKey    = c.gptKeyText;     s.gptModel    = c.gptModelText
+        s.inlineCompletionsEnabled = c.inlineEnabled
     }
 
     override fun reset() {
         val s = AppSettingsState.instance
         val c = component ?: return
-        c.kimiKeyText = s.kimiApiKey; c.kimiModelText = s.kimiModel
-        c.geminiKeyText = s.geminiApiKey; c.geminiModelText = s.geminiModel
-        c.gptKeyText = s.gptApiKey; c.gptModelText = s.gptModel
+        c.kimiKeyText    = s.kimiApiKey;    c.kimiModelText    = s.kimiModel
+        c.geminiKeyText  = s.geminiApiKey;  c.geminiModelText  = s.geminiModel
+        c.gptKeyText     = s.gptApiKey;     c.gptModelText     = s.gptModel
+        c.inlineEnabled  = s.inlineCompletionsEnabled
     }
 
     override fun disposeUIResources() { component = null }

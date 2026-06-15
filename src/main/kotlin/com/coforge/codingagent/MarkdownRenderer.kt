@@ -57,6 +57,8 @@ object MarkdownRenderer {
             ul, ol { margin: 4px 0 4px 16px; padding: 0; }
             li { margin: 2px 0; line-height: 1.5; }
             code { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: $codeBg; color: $codeColor; padding: 1px 4px; border-radius: 3px; }
+            pre { background: $codeBg; border-radius: 4px; padding: 8px 10px; margin: 6px 0; overflow-x: auto; }
+            pre code { background: transparent; padding: 0; border-radius: 0; white-space: pre; }
             b, strong { font-weight: bold; color: $fgHex; }
             i, em { font-style: italic; color: $mutedColor; }
             a { color: $accentColor; text-decoration: none; }
@@ -71,6 +73,8 @@ object MarkdownRenderer {
         var inUl = false
         var inOl = false
         var inBlockquote = false
+        var inCode = false
+        var codeLang = ""
 
         fun closeList() {
             if (inUl) { sb.append("</ul>"); inUl = false }
@@ -81,6 +85,25 @@ object MarkdownRenderer {
         }
 
         for (line in lines) {
+            // Fenced code block toggle
+            if (line.startsWith("```")) {
+                if (!inCode) {
+                    closeList(); closeBlockquote()
+                    codeLang = line.removePrefix("```").trim().ifBlank { "code" }
+                    sb.append("<pre><code class=\"lang-$codeLang\">")
+                    inCode = true
+                } else {
+                    sb.append("</code></pre>")
+                    inCode = false
+                }
+                continue
+            }
+            if (inCode) {
+                // Inside code block — escape HTML, preserve newlines
+                sb.append(line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+                sb.append("\n")
+                continue
+            }
             when {
                 line.startsWith("### ") -> {
                     closeList(); closeBlockquote()
@@ -121,6 +144,7 @@ object MarkdownRenderer {
                 }
             }
         }
+        if (inCode) sb.append("</code></pre>")
         closeList()
         closeBlockquote()
         return sb.toString()

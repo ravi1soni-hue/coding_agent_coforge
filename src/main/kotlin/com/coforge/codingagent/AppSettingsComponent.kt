@@ -1,5 +1,6 @@
 package com.coforge.codingagent
 
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
@@ -9,28 +10,33 @@ import com.intellij.ui.TitledSeparator
 class AppSettingsComponent {
     val panel: JPanel
 
-    private val kimiKeyField = JBTextField()
-    private val kimiModelField = JBTextField()
+    private val kimiKeyField    = JBTextField()
+    private val kimiModelField  = JBTextField()
 
-    private val geminiKeyField = JBTextField()
+    private val geminiKeyField   = JBTextField()
     private val geminiModelField = JBTextField()
 
-    private val gptKeyField = JBTextField()
-    private val gptModelField = JBTextField()
+    private val gptKeyField    = JBTextField()
+    private val gptModelField  = JBTextField()
+
+    private val inlineCheckBox = JBCheckBox("Enable ghost-text inline completions (Gemini Flash)")
 
     init {
         panel = FormBuilder.createFormBuilder()
-            .addComponent(TitledSeparator("Kimi Settings (Reasoning)"))
-            .addLabeledComponent(JBLabel("API Key: "), kimiKeyField, 1)
-            .addLabeledComponent(JBLabel("Model ID: "), kimiModelField, 1)
+            .addComponent(TitledSeparator("Kimi Settings (Reasoning / Planning)"))
+            .addLabeledComponent(JBLabel("API Key: "),    kimiKeyField,   1)
+            .addLabeledComponent(JBLabel("Model ID: "),   kimiModelField, 1)
 
-            .addComponent(TitledSeparator("Gemini Settings (Review)"))
-            .addLabeledComponent(JBLabel("API Key: "), geminiKeyField, 1)
-            .addLabeledComponent(JBLabel("Model ID: "), geminiModelField, 1)
+            .addComponent(TitledSeparator("Gemini Settings (Verification + Completions)"))
+            .addLabeledComponent(JBLabel("API Key: "),    geminiKeyField,   1)
+            .addLabeledComponent(JBLabel("Model ID: "),   geminiModelField, 1)
 
             .addComponent(TitledSeparator("GPT Settings (Implementation)"))
-            .addLabeledComponent(JBLabel("API Key: "), gptKeyField, 1)
-            .addLabeledComponent(JBLabel("Model ID: "), gptModelField, 1)
+            .addLabeledComponent(JBLabel("API Key: "),    gptKeyField,   1)
+            .addLabeledComponent(JBLabel("Model ID: "),   gptModelField, 1)
+
+            .addComponent(TitledSeparator("Features"))
+            .addComponent(inlineCheckBox, 1)
 
             .addComponentFillVertically(JPanel(), 8)
             .panel
@@ -59,4 +65,8 @@ class AppSettingsComponent {
     var gptModelText: String
         get() = gptModelField.text.trim()
         set(v) { gptModelField.text = v }
+
+    var inlineEnabled: Boolean
+        get() = inlineCheckBox.isSelected
+        set(v) { inlineCheckBox.isSelected = v }
 }

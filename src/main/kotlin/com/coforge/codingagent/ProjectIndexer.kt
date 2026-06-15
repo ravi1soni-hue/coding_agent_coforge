@@ -34,13 +34,25 @@ object ProjectIndexer {
         val relativePath: String,
         val absolutePath: String,
         val symbols: List<String>,   // class/fun/widget names
-        val content: String
+        val content: String,
+        val lastModifiedMs: Long = 0L  // for recency boost
+    )
+
+    // Pre-computed BM25 corpus stats — computed once per index build
+    data class CorpusStats(
+        val idf: Map<String, Double>,     // term → idf score
+        val avgDocLen: Double             // average document length in tokens
     )
 
     // LRU cache capped at 5 projects — prevents unbounded growth in multi-project IDE sessions
     private val cache = object : LinkedHashMap<String, List<FileEntry>>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<FileEntry>>) = size > 5
     }
+    private val statsCache = mutableMapOf<String, CorpusStats>()
+
+    // BM25 hyperparameters (standard tuned values)
+    private const val BM25_K1 = 1.5
+    private const val BM25_B  = 0.75
 
     // Language-specific symbol extractors
     private val KT_SYMBOLS = Regex(
@@ -64,13 +76,24 @@ object ProjectIndexer {
         val base = project.basePath ?: return emptyList()
         return synchronized(cache) { cache[base] } ?: run {
             val entries = buildIndex(base)
-            synchronized(cache) { cache[base] = entries }
+            synchronized(cache) {
+                cache[base] = entries
+                statsCache[base] = buildCorpusStats(entries)
+            }
             entries
         }
     }
 
+    private fun getStats(project: Project): CorpusStats {
+        val base = project.basePath ?: return CorpusStats(emptyMap(), 1.0)
+        return synchronized(cache) { statsCache[base] } ?: run {
+            val entries = index(project)
+            buildCorpusStats(entries).also { s -> synchronized(cache) { statsCache[base] = s } }
+        }
+    }
+
     /**
-     * Find the top-N most relevant files for a query.
+     * Find the top-N most relevant files for a query using BM25 + concept expansion + recency.
      * Returns entries with the most relevant snippet pre-extracted.
      */
     fun findRelevant(project: Project, query: String, topN: Int = 5): List<FileEntry> {
@@ -79,12 +102,13 @@ object ProjectIndexer {
 
         val baseWords = tokenize(query)
         if (baseWords.isEmpty()) return emptyList()
-        // Gap 3: expand with semantic concept synonyms
         val words = expandWithConcepts(baseWords)
+        val stats = getStats(project)
+        val nowMs = System.currentTimeMillis()
 
         return all
-            .map { entry -> entry to scoreEntry(entry, words, baseWords) }
-            .filter { (_, s) -> s > 0 }
+            .map { entry -> entry to scoreBM25(entry, words, baseWords, stats, nowMs) }
+            .filter { (_, s) -> s > 0.0 }
             .sortedByDescending { (_, s) -> s }
             .take(topN)
             .map { (entry, _) ->
@@ -98,10 +122,89 @@ object ProjectIndexer {
     }
 
     fun invalidate(project: Project) {
-        synchronized(cache) { cache.remove(project.basePath) }
+        synchronized(cache) {
+            cache.remove(project.basePath)
+            statsCache.remove(project.basePath)
+        }
     }
 
-    // ─── Scoring ──────────────────────────────────────────────────────────────
+    // ─── BM25 corpus stats ────────────────────────────────────────────────────
+
+    private fun buildCorpusStats(entries: List<FileEntry>): CorpusStats {
+        val N = entries.size.coerceAtLeast(1)
+        val df = mutableMapOf<String, Int>()   // term → count of docs containing it
+        var totalTokens = 0L
+
+        entries.forEach { entry ->
+            val terms = tokenize(entry.content + " " + entry.symbols.joinToString(" "))
+            totalTokens += terms.size
+            terms.forEach { t -> df[t] = (df[t] ?: 0) + 1 }
+        }
+
+        val idf = df.mapValues { (_, docFreq) ->
+            Math.log((N - docFreq + 0.5) / (docFreq + 0.5) + 1.0)
+        }
+        return CorpusStats(idf, totalTokens.toDouble() / N)
+    }
+
+    // ─── BM25 scoring with symbol boost + path boost + recency ───────────────
+
+    private fun scoreBM25(
+        entry: FileEntry,
+        expandedWords: Set<String>,
+        baseWords: Set<String>,
+        stats: CorpusStats,
+        nowMs: Long
+    ): Double {
+        var score = 0.0
+        val docTokens = tokenize(entry.content + " " + entry.symbols.joinToString(" "))
+        val docLen = docTokens.size.coerceAtLeast(1)
+        val tf = mutableMapOf<String, Int>()
+        docTokens.forEach { t -> tf[t] = (tf[t] ?: 0) + 1 }
+
+        val avgDocLen = stats.avgDocLen.coerceAtLeast(1.0)
+        val fileName  = entry.relativePath.substringAfterLast("/").lowercase()
+        val pathLow   = entry.relativePath.lowercase()
+        val symsLow   = entry.symbols.map { it.lowercase() }
+
+        expandedWords.forEach { w ->
+            val isBase = w in baseWords
+            val rawTf  = tf[w] ?: 0
+
+            // BM25 content score
+            if (rawTf > 0) {
+                val idfVal  = stats.idf[w] ?: 0.0
+                val normTf  = rawTf * (BM25_K1 + 1) / (rawTf + BM25_K1 * (1 - BM25_B + BM25_B * docLen / avgDocLen))
+                score += idfVal * normTf * (if (isBase) 2.0 else 1.0)
+            }
+
+            // Path/filename bonus (additive on top of BM25)
+            val pathMult = if (isBase) 1.0 else 0.4
+            if (fileName.contains(w)) score += 12.0 * pathMult
+            else if (pathLow.contains(w)) score += 5.0 * pathMult
+
+            // Symbol name bonus
+            symsLow.forEach { sym ->
+                val symMult = if (isBase) 1.0 else 0.4
+                when {
+                    sym == w          -> score += 14.0 * symMult
+                    sym.contains(w)   -> score += 6.0 * symMult
+                }
+            }
+        }
+
+        // Recency boost: files modified in last hour score 20% higher; last day 10%
+        val ageMs = nowMs - entry.lastModifiedMs
+        val recencyMult = when {
+            ageMs < 3_600_000L   -> 1.20   // < 1 hour
+            ageMs < 86_400_000L  -> 1.10   // < 1 day
+            else                 -> 1.00
+        }
+
+        return score * recencyMult
+    }
+
+    // ─── Legacy TF-IDF scoring (kept for CodebaseGraph which calls scoreEntry) ─
 
     /**
      * Gap 3: Semantic scoring. Uses concept-expanded words for broader recall,
@@ -191,7 +294,7 @@ object ProjectIndexer {
                 try {
                     val content = file.readText(Charsets.UTF_8)
                     val relative = file.relativeTo(root).path.replace("\\", "/")
-                    entries.add(FileEntry(relative, file.absolutePath, extractSymbols(content, file.extension), content))
+                    entries.add(FileEntry(relative, file.absolutePath, extractSymbols(content, file.extension), content, file.lastModified()))
                     count++
                 } catch (_: Exception) {}
             }

@@ -35,8 +35,8 @@ class ChatToolWindowContent(private val project: Project) {
 
     val contentPanel: JComponent
 
-    private val gson   = Gson()
-    private val history = mutableListOf<Message>()
+    private val gson    = Gson()
+    private val history = ProjectHistoryService.getInstance(project).load(project)
     private val isFlutter get() =
         ProjectTypeDetector.detect(project).type == ProjectTypeDetector.ProjectType.FLUTTER
 
@@ -159,6 +159,7 @@ class ChatToolWindowContent(private val project: Project) {
             } catch (_: Exception) { "" }
 
             val fullContext = if (graphCtx.isNotBlank()) "$context\n\n---\n\n$graphCtx" else context
+            warnIfHugeContext(fullContext)
 
             AiService.callAgentChain(
                 userMessage = text,
@@ -171,6 +172,7 @@ class ChatToolWindowContent(private val project: Project) {
                 onToken     = { tok -> push("token",     tok) },
                 onComplete  = { full ->
                     history.add(Message("assistant", full))
+                    ProjectHistoryService.getInstance(project).save(project, history)
                     push("complete", full)
                     activeThread = null
                 }
@@ -189,6 +191,7 @@ class ChatToolWindowContent(private val project: Project) {
 
     private fun onReset() {
         AiService.stop(); history.clear()
+        ProjectHistoryService.getInstance(project).clear(project)
         ProjectIndexer.invalidate(project)
         ProjectDependencyAnalyzer.invalidate(project)
         ProjectTypeDetector.invalidate(project)
@@ -588,6 +591,14 @@ class ChatToolWindowContent(private val project: Project) {
     // File change parsing — supports <search>/<replace> surgical edits
     private data class FC(val path: String, val content: String, val isNew: Boolean, val search: String? = null)
 
+    // Strip only leading/trailing newlines — preserve internal indentation
+    private fun String.trimNewlines(): String {
+        var s = this
+        while (s.startsWith("\n") || s.startsWith("\r")) s = s.drop(1)
+        while (s.endsWith("\n") || s.endsWith("\r")) s = s.dropLast(1)
+        return s
+    }
+
     private fun parseChanges(r: String): List<FC> {
         val list = mutableListOf<FC>()
         Regex("""<file_change\s+path="([^"]+)">([\s\S]*?)</file_change>""").findAll(r)
@@ -597,14 +608,14 @@ class ChatToolWindowContent(private val project: Project) {
                 val sm = Regex("""<search>([\s\S]*?)</search>""").find(body)
                 val rm = Regex("""<replace>([\s\S]*?)</replace>""").find(body)
                 if (sm != null && rm != null) {
-                    list.add(FC(path, rm.groupValues[1].trim(), false, sm.groupValues[1].trim()))
+                    // trimNewlines only — preserve indentation inside blocks
+                    list.add(FC(path, rm.groupValues[1].trimNewlines(), false, sm.groupValues[1].trimNewlines()))
                 } else {
-                    // Legacy: no search/replace — treat whole body as content (full overwrite)
-                    list.add(FC(path, body.trim(), false, null))
+                    list.add(FC(path, body.trimNewlines(), false, null))
                 }
             }
         Regex("""<new_file\s+path="([^"]+)">([\s\S]*?)</new_file>""").findAll(r)
-            .forEach { m -> list.add(FC(m.groupValues[1].trim(), m.groupValues[2].trim(), true, null)) }
+            .forEach { m -> list.add(FC(m.groupValues[1].trim(), m.groupValues[2].trimNewlines(), true, null)) }
         return list
     }
 
@@ -629,6 +640,46 @@ class ChatToolWindowContent(private val project: Project) {
     fun prefillAndSend(prompt: String) {
         val esc = prompt.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
         js("App.prefill('$esc')")
+    }
+
+    /** Reads git diff (staged or HEAD), then prefills the AI chat for commit message generation. */
+    fun triggerCommitMessage() {
+        push("status", "Reading git changes...")
+        js("""App.sysLine("📝 Reading git changes...")""")
+        val diff = StringBuilder()
+        TerminalExecutor.gitDiff(
+            project,
+            { line -> diff.append(line) },
+            { _ ->
+                val diffText = diff.toString().trim()
+                if (diffText.isBlank()) {
+                    push("status", "No changes found")
+                    js("""App.sysLine("⚠️ No changes found. Make some edits first.")""")
+                    return@gitDiff
+                }
+                val prompt = "Generate a git commit message (Conventional Commits format: feat/fix/refactor/docs/test/chore) for these changes. Output ONLY the commit message (subject ≤72 chars + optional body), nothing else.\n\n```diff\n${diffText.take(6000)}\n```"
+                ApplicationManager.getApplication().invokeLater {
+                    val promptEsc = buildString {
+                        for (c in prompt) when (c) {
+                            '\\' -> append("\\\\")
+                            '\'' -> append("\\'")
+                            '\n' -> append("\\n")
+                            '\r' -> {}
+                            else -> append(c)
+                        }
+                    }
+                    js("App.prefill('$promptEsc')")
+                }
+            }
+        )
+    }
+
+    /** Approximate token count warning (1 token ≈ 4 chars). */
+    private fun warnIfHugeContext(context: String) {
+        val approxTokens = context.length / 4
+        if (approxTokens > 80_000) {
+            push("status", "⚠️ Context ~${approxTokens / 1000}k tokens — may hit model limit")
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

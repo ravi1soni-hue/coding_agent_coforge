@@ -60,6 +60,21 @@ object TerminalExecutor {
         run(base, listOf("flutter", "analyze"), onOutput, onDone)
     }
 
+    // ─── Git helpers ──────────────────────────────────────────────────────────
+
+    /** Returns staged diff (git diff --staged) or HEAD diff if nothing staged. */
+    fun gitDiff(project: Project, onOutput: (String) -> Unit, onDone: (CommandResult) -> Unit) {
+        val base = project.basePath ?: return onDone(CommandResult(-1, "No project path"))
+        run(base, listOf("git", "diff", "--staged"), onOutput) { result ->
+            if (result.output.isBlank()) {
+                // Nothing staged — fall back to diff against HEAD
+                run(base, listOf("git", "diff", "HEAD"), onOutput, onDone)
+            } else {
+                onDone(result)
+            }
+        }
+    }
+
     // ─── Generic runner ───────────────────────────────────────────────────────
 
     fun run(
