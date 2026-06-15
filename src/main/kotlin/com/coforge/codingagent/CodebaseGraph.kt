@@ -35,7 +35,8 @@ object CodebaseGraph {
 
     private val IMPORT_KT   = Regex("""^import\s+([\w.]+)""", RegexOption.MULTILINE)
     private val IMPORT_JAVA  = Regex("""^import\s+([\w.]+);""", RegexOption.MULTILINE)
-    private val IMPORT_DART  = Regex("""^import\s+'[^']*?([a-z_]+\.dart)'""", RegexOption.MULTILINE)
+    // Matches both package: imports (package:riverpod/...) and relative .dart imports
+    private val IMPORT_DART  = Regex("""^import\s+'(?:package:([a-z_]+)/[^']*|[^']*?([a-z_]+)\.dart)'""", RegexOption.MULTILINE)
     private val IDENT        = Regex("""\b([A-Z][a-zA-Z0-9]{2,})\b""")
 
     // Common Pascal-case words that are NOT useful for cross-file graph linking
@@ -207,7 +208,10 @@ object CodebaseGraph {
         when (ext) {
             "kt", "kts" -> IMPORT_KT.findAll(content).map { it.groupValues[1].substringAfterLast(".") }.toSet()
             "java"       -> IMPORT_JAVA.findAll(content).map { it.groupValues[1].substringAfterLast(".") }.toSet()
-            "dart"       -> IMPORT_DART.findAll(content).map { it.groupValues[1].removeSuffix(".dart") }.toSet()
+            // group 1 = package name (package: imports), group 2 = .dart file stem (relative imports)
+            "dart"       -> IMPORT_DART.findAll(content).map { m ->
+                m.groupValues[1].ifBlank { m.groupValues[2] }
+            }.filter { it.isNotBlank() }.toSet()
             else         -> emptySet()
         }
 

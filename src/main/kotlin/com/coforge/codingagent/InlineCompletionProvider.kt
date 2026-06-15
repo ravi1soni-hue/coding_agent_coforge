@@ -39,20 +39,23 @@ class AiInlineCompletionProvider : InlineCompletionProvider {
         // 200ms debounce: cancels automatically when the user keeps typing
         delay(200)
 
-        val (prefix, suffix, language) = withContext(Dispatchers.Default) {
-            ReadAction.compute<Triple<String, String, String>, Throwable> {
+        data class CtxData(val pre: String, val suf: String, val lang: String, val projPath: String)
+        val ctx = withContext(Dispatchers.Default) {
+            ReadAction.compute<CtxData, Throwable> {
                 val doc    = request.editor.document
                 val offset = request.startOffset.coerceIn(0, doc.textLength)
                 val text   = doc.text
                 val pre    = text.substring(maxOf(0, offset - 3000), offset)
                 val suf    = text.substring(offset, minOf(text.length, offset + 500))
                 val lang   = request.editor.virtualFile?.extension?.lowercase() ?: "kotlin"
-                Triple(pre, suf, lang)
+                val proj   = request.editor.project?.basePath ?: ""
+                CtxData(pre, suf, lang, proj)
             }
         }
+        val (prefix, suffix, language, projectPath) = ctx
 
-        // Language-scoped cache key prevents cross-file collisions
-        val cacheKey = "$language::${prefix.takeLast(300)}::${suffix.take(100)}"
+        // Project + language + context key prevents cross-project and cross-file cache collisions
+        val cacheKey = "$projectPath::$language::${prefix.takeLast(300)}::${suffix.take(100)}"
         completionCache[cacheKey]?.let { cached ->
             return if (cached.isBlank()) InlineCompletionSuggestion.Empty
                    else InlineCompletionSingleSuggestion.build { emit(InlineCompletionGrayTextElement(cached)) }

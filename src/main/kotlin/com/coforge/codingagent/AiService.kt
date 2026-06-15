@@ -531,20 +531,28 @@ object AiService {
     // ─── Kimi plan parser ─────────────────────────────────────────────────────
 
     private fun parseKimiPlan(raw: String): KimiPlan {
-        fun extractLine(key: String): String {
-            val line = raw.lines().firstOrNull {
-                it.trim().startsWith(key, ignoreCase = true)
-            } ?: return ""
-            return line.substringAfter(":").trim()
+        // Tolerant extractor: key can appear anywhere on the line; value may span to next blank line
+        fun extractValue(key: String): String {
+            val re = Regex("(?:^|\\n)\\s*${Regex.escape(key)}\\s*:?\\s*(.+)", RegexOption.IGNORE_CASE)
+            val match = re.find(raw) ?: return ""
+            var value = match.groupValues[1].trim()
+            // If value is empty or just "[", scan following lines until blank
+            if (value.isBlank() || value == "[") {
+                val startIdx = match.range.last
+                val tail = raw.substring(startIdx).lines().drop(1)
+                    .takeWhile { it.isNotBlank() }.joinToString(", ")
+                value = tail
+            }
+            return value.trim('[', ']', ' ')
         }
 
-        val action = extractLine("ACTION").takeIf { it.isNotBlank() } ?: "CREATE_FILES"
+        val action = extractValue("ACTION").takeIf { it.isNotBlank() } ?: "CREATE_FILES"
 
-        val filesLine = extractLine("FILES_NEEDED")
+        val filesLine = extractValue("FILES_NEEDED")
         val requestedFiles = if (filesLine.isBlank() || filesLine.equals("none", ignoreCase = true)) emptyList()
                              else filesLine.split(",").map { it.trim() }.filter { it.isNotBlank() }
 
-        val searchLine = extractLine("SEARCH_QUERIES")
+        val searchLine = extractValue("SEARCH_QUERIES")
         val searchQueries = if (searchLine.isBlank() || searchLine.equals("none", ignoreCase = true)) emptyList()
                             else searchLine.split(",").map { it.trim() }.filter { it.isNotBlank() }
 

@@ -11,9 +11,9 @@ import com.intellij.util.xmlb.XmlSerializerUtil
     storages = [Storage("CoforgeAiCodingAgentSettings.xml")]
 )
 class AppSettingsState : PersistentStateComponent<AppSettingsState> {
-    var kimiApiKey: String = "b9620fa1-4f98-4f04-9124-3f7df8081dda"
-    var geminiApiKey: String = "2f9393c2-c0e8-41e3-8c72-bc6a4e2bd31a"
-    var gptApiKey: String = "823691f4-bec2-45fb-83d1-b8a786953b03"
+    var kimiApiKey: String = ""
+    var geminiApiKey: String = ""
+    var gptApiKey: String = ""
 
     // Model names verified live against Coforge gateway
     var kimiModel: String = "kimi-k2-thinking"

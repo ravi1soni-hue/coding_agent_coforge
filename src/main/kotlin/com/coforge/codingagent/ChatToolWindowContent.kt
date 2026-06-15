@@ -153,10 +153,17 @@ class ChatToolWindowContent(private val project: Project) {
                 }
             } catch (_: Exception) { "" }
 
+            // Semantic graph search — runs on pool thread, no read lock needed
+            val graphCtx: String = try {
+                EditorContext.getIndexedContext(project, text)
+            } catch (_: Exception) { "" }
+
+            val fullContext = if (graphCtx.isNotBlank()) "$context\n\n---\n\n$graphCtx" else context
+
             AiService.callAgentChain(
                 userMessage = text,
                 history     = history.dropLast(1),
-                context     = context,
+                context     = fullContext,
                 images      = images,
                 project     = project,
                 onStatus    = { s   -> push("status",    s)   },
@@ -235,21 +242,38 @@ class ChatToolWindowContent(private val project: Project) {
         val applied = mutableListOf<String>()
         val batchSnap = mutableMapOf<String, String>()  // undo snapshot for entire batch
 
-        WriteCommandAction.runWriteCommandAction(project) {
-            files.forEach { el ->
-                val o       = el.asJsonObject
-                val path    = o["path"]?.asString    ?: return@forEach
-                val content = o["content"]?.asString ?: return@forEach
-                val isNew   = o["isNew"]?.asBoolean  ?: false
-                val search  = o["search"]?.asString?.takeIf { it.isNotBlank() }
-                try {
-                    // Snapshot before overwrite for batch undo
-                    val base = project.basePath ?: ""
-                    val existingFile = java.io.File("$base/$path")
-                    if (existingFile.exists()) batchSnap[path] = existingFile.readText(Charsets.UTF_8)
-                    else batchSnap[path] = ""
+        // Collect diffs on EDT before writing so user can preview every file
+        val fileList = files.map { it.asJsonObject }.filter {
+            it["path"]?.asString != null && it["content"]?.asString != null
+        }
 
-                    writeFile(path, content, isNew, search)
+        ApplicationManager.getApplication().invokeAndWait {
+            val base = project.basePath ?: return@invokeAndWait
+            fileList.forEach { o ->
+                val path    = o["path"].asString.trim()
+                val content = o["content"].asString
+                val isNew   = o["isNew"]?.asBoolean ?: false
+                val search  = o["search"]?.asString?.takeIf { it.isNotBlank() }
+                val existing = java.io.File("$base/$path")
+                val oldContent = if (existing.exists()) existing.readText(Charsets.UTF_8) else ""
+                val newContent = if (search != null) oldContent.let { cur ->
+                    val norm = cur.lines().joinToString("\n") { it.trimEnd() }
+                    val normS = search.lines().joinToString("\n") { it.trimEnd() }
+                    val idx = norm.indexOf(normS)
+                    if (idx >= 0) cur.substring(0, idx) + content + cur.substring(idx + normS.length)
+                    else cur.replaceFirst(search, content)
+                } else content
+                val dlg = DiffPreviewDialog(project, path, oldContent, newContent, isNew)
+                if (!dlg.showAndGet()) {
+                    pushRaw("""{"type":"apply_skip","path":${gson.toJson(path)}}""")
+                    return@forEach
+                }
+                // Write approved file immediately
+                try {
+                    if (existing.exists()) batchSnap[path] = oldContent else batchSnap[path] = ""
+                    WriteCommandAction.runWriteCommandAction(project) {
+                        writeFile(path, content, isNew, search)
+                    }
                     applied.add(path)
                     pushRaw("""{"type":"applied","path":${gson.toJson(path)}}""")
                 } catch (e: Exception) {
@@ -327,7 +351,6 @@ class ChatToolWindowContent(private val project: Project) {
                     onToken     = { tok -> push("token", tok) },
                     onComplete  = { full ->
                         if (full.isNotBlank()) {
-                            history.add(Message("assistant", "[auto-fix] $full"))
                             push("complete", full)
                         }
                     }
@@ -474,14 +497,21 @@ class ChatToolWindowContent(private val project: Project) {
         val prompt = "Fix these $label errors:\n```\n$errs\n```"
         history.add(Message("user", prompt))
         js("""App.sysLine("🔧 Auto-fixing $label errors..."); App.startStream()""")
-        val ctx = try { EditorContext.getSmartContext(project, emptyList()) } catch (_: Exception) { "" }
-        AiService.callAgentChain(
-            userMessage = prompt, history = history.dropLast(1), context = ctx, project = project,
-            onStatus    = { s   -> push("status", s) },
-            onReasoning = { _   -> },
-            onToken     = { tok -> push("token", tok) },
-            onComplete  = { full -> history.add(Message("assistant", full)); push("complete", full) }
-        )
+        // PSI access requires a read lock — must be on pooled thread, not EDT
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val ctx = try {
+                ApplicationManager.getApplication().runReadAction<String> {
+                    EditorContext.getSmartContext(project, emptyList())
+                }
+            } catch (_: Exception) { "" }
+            AiService.callAgentChain(
+                userMessage = prompt, history = history.dropLast(1), context = ctx, project = project,
+                onStatus    = { s   -> push("status", s) },
+                onReasoning = { _   -> },
+                onToken     = { tok -> push("token", tok) },
+                onComplete  = { full -> history.add(Message("assistant", full)); push("complete", full) }
+            )
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -528,7 +558,17 @@ class ChatToolWindowContent(private val project: Project) {
         pushRaw("""{"type":${gson.toJson(type)},"data":${gson.toJson(data)}}""")
 
     private fun pushRaw(json: String) {
-        val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
+        // Embed JSON as a JS string literal — escape all control chars + quotes + backslashes
+        val escaped = buildString {
+            for (c in json) when (c) {
+                '\\' -> append("\\\\")
+                '\'' -> append("\\'")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(c)
+            }
+        }
         js("window.onK('$escaped')")
     }
 
