@@ -50,6 +50,10 @@ object ProjectIndexer {
     }
     private val statsCache = mutableMapOf<String, CorpusStats>()
 
+    // Embedding vectors per file: projectBase → (absolutePath → vector)
+    // Built in background after index is ready; consulted in findRelevant if available
+    private val embeddingCache = mutableMapOf<String, MutableMap<String, FloatArray>>()
+
     // BM25 hyperparameters (standard tuned values)
     private const val BM25_K1 = 1.5
     private const val BM25_B  = 0.75
@@ -93,8 +97,17 @@ object ProjectIndexer {
     }
 
     /**
-     * Find the top-N most relevant files for a query using BM25 + concept expansion + recency.
-     * Returns entries with the most relevant snippet pre-extracted.
+     * Find the top-N most relevant files using hybrid BM25 + semantic embedding search.
+     *
+     * Algorithm:
+     * 1. BM25 (+ concept expansion + recency) → top-20 candidates
+     * 2. If embedding API key is configured AND file embeddings are pre-built:
+     *    - Embed the query (1 API call)
+     *    - Cosine similarity against pre-built file vectors
+     *    - Hybrid score: 0.65 * normalized_bm25 + 0.35 * cosine
+     * 3. Re-rank top-N from hybrid score
+     *
+     * Falls back to pure BM25 if embeddings are not yet ready.
      */
     fun findRelevant(project: Project, query: String, topN: Int = 5): List<FileEntry> {
         val all = index(project)
@@ -105,11 +118,43 @@ object ProjectIndexer {
         val words = expandWithConcepts(baseWords)
         val stats = getStats(project)
         val nowMs = System.currentTimeMillis()
+        val base = project.basePath ?: ""
 
-        return all
+        // Step 1: BM25 candidates (top-20)
+        val bm25Scored = all
             .map { entry -> entry to scoreBM25(entry, words, baseWords, stats, nowMs) }
             .filter { (_, s) -> s > 0.0 }
             .sortedByDescending { (_, s) -> s }
+            .take(20)
+
+        if (bm25Scored.isEmpty()) return emptyList()
+
+        // Step 2: hybrid re-ranking with embedding similarity
+        val embeddingKey = AppSettingsState.instance.embeddingApiKey
+        val fileEmbeddings = synchronized(embeddingCache) { embeddingCache[base] }
+
+        val finalScored: List<Pair<FileEntry, Double>> = if (
+            embeddingKey.isNotBlank() && fileEmbeddings != null && fileEmbeddings.isNotEmpty()
+        ) {
+            val queryVec = try {
+                EmbeddingService.embed(query, embeddingKey)
+            } catch (_: Exception) { null }
+
+            if (queryVec != null) {
+                val maxBm25 = bm25Scored.maxOf { it.second }.coerceAtLeast(0.001)
+                bm25Scored.map { (entry, bm25) ->
+                    val fileVec = fileEmbeddings[entry.absolutePath]
+                    val cosine = if (fileVec != null) EmbeddingService.cosineSimilarity(queryVec, fileVec).toDouble() else 0.0
+                    entry to (0.65 * (bm25 / maxBm25) + 0.35 * cosine)
+                }.sortedByDescending { it.second }
+            } else {
+                bm25Scored
+            }
+        } else {
+            bm25Scored
+        }
+
+        return finalScored
             .take(topN)
             .map { (entry, _) ->
                 entry.copy(content = extractRelevantSection(entry.content, baseWords, SNIPPET_LINES))
@@ -118,7 +163,44 @@ object ProjectIndexer {
 
     /** Start indexing in a background thread so it's ready when first query arrives. */
     fun warmUp(project: Project) {
-        Thread { index(project) }.apply { isDaemon = true; name = "CoforgeIndexer" }.start()
+        Thread {
+            index(project)
+            // After BM25 index is built, pre-compute embeddings in background
+            buildEmbeddingsInBackground(project)
+        }.apply { isDaemon = true; name = "CoforgeIndexer" }.start()
+    }
+
+    /**
+     * Pre-compute embedding vectors for all indexed files.
+     * Runs in small batches with delays to avoid rate-limiting the embedding endpoint.
+     * Vectors are stored in embeddingCache and picked up by subsequent findRelevant calls.
+     */
+    private fun buildEmbeddingsInBackground(project: Project) {
+        val apiKey = AppSettingsState.instance.embeddingApiKey
+        if (apiKey.isBlank()) return
+
+        val base = project.basePath ?: return
+        val entries = synchronized(cache) { cache[base] } ?: return
+        val vectors = synchronized(embeddingCache) { embeddingCache.getOrPut(base) { mutableMapOf() } }
+
+        var batchCount = 0
+        for (entry in entries) {
+            if (vectors.containsKey(entry.absolutePath)) continue
+            val textToEmbed = buildString {
+                append(entry.relativePath)
+                append(" ")
+                append(entry.symbols.take(20).joinToString(" "))
+                if (length < 300) append(" ").append(entry.content.take(300 - length))
+            }
+            try {
+                val vec = EmbeddingService.embed(textToEmbed, apiKey) ?: continue
+                synchronized(embeddingCache) { vectors[entry.absolutePath] = vec }
+                batchCount++
+                // Batch of 5: pause 600ms to stay within rate limits
+                if (batchCount % 5 == 0) Thread.sleep(600)
+            } catch (_: InterruptedException) { break }
+            catch (_: Exception) { continue }
+        }
     }
 
     fun invalidate(project: Project) {
@@ -126,6 +208,8 @@ object ProjectIndexer {
             cache.remove(project.basePath)
             statsCache.remove(project.basePath)
         }
+        synchronized(embeddingCache) { embeddingCache.remove(project.basePath) }
+        EmbeddingService.clearCache()
     }
 
     // ─── BM25 corpus stats ────────────────────────────────────────────────────

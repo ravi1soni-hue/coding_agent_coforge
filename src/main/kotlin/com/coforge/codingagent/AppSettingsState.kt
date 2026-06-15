@@ -14,11 +14,13 @@ class AppSettingsState : PersistentStateComponent<AppSettingsState> {
     var kimiApiKey: String = ""
     var geminiApiKey: String = ""
     var gptApiKey: String = ""
+    var embeddingApiKey: String = ""
 
     // Model names verified live against Coforge gateway
     var kimiModel: String = "kimi-k2-thinking"
     var geminiModel: String = "gemini-2-5-flash"
     var gptModel: String = "gpt-5-2-chat"
+    var embeddingModel: String = "text-embeddings"
 
     var inlineCompletionsEnabled: Boolean = true
 

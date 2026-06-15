@@ -55,6 +55,15 @@ object EditorContext {
         getPsiContext(psiFile, caretOffset)?.let { sb.append(" ($it)") }
         sb.append("\n")
 
+        // Kotlin files: append full public API signatures for the active file
+        if (file.extension in setOf("kt", "kts")) {
+            try {
+                val symbols = KotlinPsiService.extractSymbols(project, file)
+                val sigBlock = KotlinPsiService.formatForContext(symbols)
+                if (sigBlock.isNotBlank()) sb.append("Public API signatures:\n$sigBlock")
+            } catch (_: Exception) {}
+        }
+
         // Diagnostics at cursor
         getDiagnostics(doc, editor)?.let { sb.append("$it\n") }
 
@@ -99,37 +108,27 @@ object EditorContext {
                 if (!imports.isNullOrEmpty()) parts.add("imports: ${imports.joinToString(", ")}")
             }
             "kt", "kts" -> {
-                // Kotlin: use regex-based extraction (avoids Kotlin PSI version issues)
-                // Also try Java PSI for class context — works for Kotlin classes in IntelliJ
-                PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.let { cls ->
-                    parts.add("class ${cls.name}")
+                // Use KotlinPsiService for rich type signatures (return types, params, modifiers)
+                val ktCtx = psiFile.virtualFile?.let {
+                    KotlinPsiService.getEnclosingContext(psiFile.project, it, offset)
                 }
-                PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)?.let { method ->
-                    parts.add("fun ${method.name}()")
+                if (ktCtx != null) {
+                    parts.add(ktCtx)
+                } else {
+                    // Fallback if Kotlin PSI unavailable for this file
+                    PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.let { cls ->
+                        parts.add("class ${cls.name}")
+                    }
+                    PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)?.let { method ->
+                        parts.add("fun ${method.name}()")
+                    }
                 }
-                // Regex fallback for top-level funs (not inside a class)
-                if (parts.isEmpty()) {
-                    val text = psiFile.text
-                    val lineNum = psiFile.text.substring(0, offset.coerceAtMost(text.length)).count { it == '\n' }
-                    Regex("""(?:^|\n)\s*(?:class|object|interface|data class)\s+(\w+)""")
-                        .findAll(text).lastOrNull { m -> text.substring(0, m.range.first).count { it == '\n' } <= lineNum }
-                        ?.groupValues?.get(1)?.let { parts.add("class $it") }
-                    Regex("""(?:^|\n)\s*(?:fun|suspend fun)\s+(\w+)\s*\(""")
-                        .findAll(text).lastOrNull { m -> text.substring(0, m.range.first).count { it == '\n' } <= lineNum }
-                        ?.groupValues?.get(1)?.let { parts.add("fun $it()") }
-                }
-                // Kotlin imports — all frameworks
-                psiFile.text.lines().filter { it.startsWith("import ") }.take(20)
-                    .map { it.removePrefix("import ").trim() }
-                    .filter { isRelevantImport(it) }
-                    .take(12)
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { parts.add("imports: ${it.joinToString(", ")}") }
             }
             "dart" -> {
-                // Dart: regex-based extraction
+                // Dart: regex-based structural extraction + Dart LSP hover for type at cursor
                 val text = psiFile.text
                 val lineNum = text.substring(0, offset.coerceAtMost(text.length)).count { it == '\n' }
+                val colNum  = offset - (text.lastIndexOf('\n', offset - 1) + 1)
                 Regex("""(?:^|\n)\s*(?:abstract\s+)?(?:class|mixin|extension)\s+(\w+)""")
                     .findAll(text).lastOrNull { m -> text.substring(0, m.range.first).count { it == '\n' } <= lineNum }
                     ?.groupValues?.get(1)?.let { parts.add("class $it") }
@@ -142,6 +141,17 @@ object EditorContext {
                     .take(10)
                     .takeIf { it.isNotEmpty() }
                     ?.let { parts.add("imports: ${it.joinToString(", ")}") }
+                // Dart LSP hover: enriches with actual return type / type annotation at cursor
+                val filePath = psiFile.virtualFile?.path
+                if (filePath != null) {
+                    try {
+                        val lsp = DartLspService.getInstance(psiFile.project)
+                        lsp.ensureStarted()
+                        lsp.hover(filePath, lineNum, colNum, timeoutMs = 1200)
+                            ?.lines()?.firstOrNull { it.isNotBlank() }
+                            ?.let { parts.add("type: $it") }
+                    } catch (_: Exception) {}
+                }
             }
         }
 

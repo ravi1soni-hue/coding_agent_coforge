@@ -58,7 +58,9 @@ class QuickActionsGroup : ActionGroup(), DumbAware {
                     val proj = e.project ?: return
                     openChat(proj) { chat -> chat.triggerCommitMessage() }
                 }
-            }
+            },
+            Separator.create(),
+            RenameSymbolAction()
         )
 
         return selectionActions + platformSpecific + fileActions

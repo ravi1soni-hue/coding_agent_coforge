@@ -42,6 +42,7 @@ class ChatToolWindowContent(private val project: Project) {
 
     private val browser: JBCefBrowser?
     private val jsQuery: JBCefJSQuery?
+    private val swingChat: SwingChatPanel?   // non-null when JCEF is unavailable
 
     // ── Undo stack: path → original content before last write ─────────────────
     private val undoStack = ArrayDeque<Map<String, String>>()  // each entry = one apply batch
@@ -54,6 +55,7 @@ class ChatToolWindowContent(private val project: Project) {
             val b        = JBCefBrowser()
             browser      = b
             jsQuery      = JBCefJSQuery.create(b)
+            swingChat    = null
             contentPanel = b.component
 
             setupBridge()
@@ -64,7 +66,13 @@ class ChatToolWindowContent(private val project: Project) {
         } else {
             browser      = null
             jsQuery      = null
-            contentPanel = buildSetupPanel()
+            val sp       = SwingChatPanel(project, history)
+            swingChat    = sp
+            contentPanel = sp.component
+
+            // Warm up the index even in Swing mode so getIndexedContext works
+            Thread { ProjectIndexer.warmUp(project) }
+                .apply { isDaemon = true; name = "CoforgeWarmupSwing" }.start()
         }
     }
 
@@ -652,6 +660,9 @@ class ChatToolWindowContent(private val project: Project) {
 
     // Public API for QuickActionsGroup
     fun prefillAndSend(prompt: String) {
+        // Swing fallback path
+        if (swingChat != null) { swingChat.prefillAndSend(prompt); return }
+
         val esc = buildString {
             for (c in prompt) when (c) {
                 '\\' -> append("\\\\")

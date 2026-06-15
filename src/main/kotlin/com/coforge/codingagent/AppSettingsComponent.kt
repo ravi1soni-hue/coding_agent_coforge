@@ -19,6 +19,9 @@ class AppSettingsComponent {
     private val gptKeyField    = JBTextField()
     private val gptModelField  = JBTextField()
 
+    private val embeddingKeyField   = JBTextField()
+    private val embeddingModelField = JBTextField()
+
     private val inlineCheckBox = JBCheckBox("Enable ghost-text inline completions (Gemini Flash)")
 
     init {
@@ -34,6 +37,10 @@ class AppSettingsComponent {
             .addComponent(TitledSeparator("GPT Settings (Implementation)"))
             .addLabeledComponent(JBLabel("API Key: "),    gptKeyField,   1)
             .addLabeledComponent(JBLabel("Model ID: "),   gptModelField, 1)
+
+            .addComponent(TitledSeparator("Embedding Settings (Semantic Vector Search)"))
+            .addLabeledComponent(JBLabel("API Key: "),    embeddingKeyField,   1)
+            .addLabeledComponent(JBLabel("Model ID: "),   embeddingModelField, 1)
 
             .addComponent(TitledSeparator("Features"))
             .addComponent(inlineCheckBox, 1)
@@ -65,6 +72,14 @@ class AppSettingsComponent {
     var gptModelText: String
         get() = gptModelField.text.trim()
         set(v) { gptModelField.text = v }
+
+    var embeddingKeyText: String
+        get() = embeddingKeyField.text.trim()
+        set(v) { embeddingKeyField.text = v }
+
+    var embeddingModelText: String
+        get() = embeddingModelField.text.trim()
+        set(v) { embeddingModelField.text = v }
 
     var inlineEnabled: Boolean
         get() = inlineCheckBox.isSelected

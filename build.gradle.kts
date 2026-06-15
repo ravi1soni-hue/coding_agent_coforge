@@ -22,10 +22,11 @@ dependencies {
     
     intellijPlatform {
         // Target SDK: Ladybug (Build 241)
-        androidStudio("2024.1.2.12") 
-        // Removed "org.jetbrains.kotlin" to fix incompatibility with Kotlin K2 mode.
-        // The plugin does not use internal Kotlin IDE APIs, so this dependency is unnecessary.
-        bundledPlugins("com.intellij.java")
+        androidStudio("2024.1.2.12")
+        // org.jetbrains.kotlin is re-added to enable KtFile/KtNamedFunction/KtClass PSI APIs
+        // for real Kotlin type resolution (KotlinPsiService) and multi-file rename.
+        // We use only stable structural PSI (no internal analysis APIs), so K2 compatibility is preserved.
+        bundledPlugins("com.intellij.java", "org.jetbrains.kotlin")
         instrumentationTools()
     }
 }

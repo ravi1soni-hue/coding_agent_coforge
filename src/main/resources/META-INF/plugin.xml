@@ -12,6 +12,7 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
     <depends>com.intellij.modules.java</depends>
+    <depends>org.jetbrains.kotlin</depends>
 
     <extensions defaultExtensionNs="com.intellij">
 
@@ -32,6 +33,9 @@
 
         <!-- Build error capture (project-level) -->
         <projectService serviceImplementation="com.coforge.codingagent.BuildContextService"/>
+
+        <!-- Dart Analysis Server LSP client (project-level, only active in Flutter projects) -->
+        <projectService serviceImplementation="com.coforge.codingagent.DartLspService"/>
 
         <!-- URL content fetching and project type detection are stateless objects, no registration needed -->
 
@@ -56,6 +60,14 @@
                popup="true">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </group>
+
+        <!-- Standalone rename action — also accessible via Find Action (⌘⇧A) -->
+        <action id="CoforgeAi.RenameSymbol"
+                class="com.coforge.codingagent.RenameSymbolAction"
+                text="Coforge AI: Rename Symbol Across Project…"
+                description="Rename the symbol under cursor in all files">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift ctrl R"/>
+        </action>
     </actions>
 
 </idea-plugin>
