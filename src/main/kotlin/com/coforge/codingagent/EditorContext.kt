@@ -141,15 +141,21 @@ object EditorContext {
                     .take(10)
                     .takeIf { it.isNotEmpty() }
                     ?.let { parts.add("imports: ${it.joinToString(", ")}") }
-                // Dart LSP hover: enriches with actual return type / type annotation at cursor
+                // Dart LSP hover: enriches with actual return type / type annotation at cursor.
+                // Only queries if LSP is already initialized (avoids blocking the read lock on first use).
+                // DartLspService.ensureStarted() is called lazily from the first warmUp.
                 val filePath = psiFile.virtualFile?.path
                 if (filePath != null) {
                     try {
                         val lsp = DartLspService.getInstance(psiFile.project)
-                        lsp.ensureStarted()
-                        lsp.hover(filePath, lineNum, colNum, timeoutMs = 1200)
-                            ?.lines()?.firstOrNull { it.isNotBlank() }
-                            ?.let { parts.add("type: $it") }
+                        if (lsp.initialized) {
+                            lsp.hover(filePath, lineNum, colNum, timeoutMs = 400)
+                                ?.lines()?.firstOrNull { it.isNotBlank() }
+                                ?.let { parts.add("type: $it") }
+                        } else {
+                            // Kick off async start so it's ready for the next request
+                            Thread { lsp.ensureStarted() }.apply { isDaemon = true; start() }
+                        }
                     } catch (_: Exception) {}
                 }
             }

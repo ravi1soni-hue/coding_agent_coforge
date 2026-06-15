@@ -31,7 +31,8 @@ class DartLspService(private val project: Project) : Disposable {
     private val idCounter = AtomicInteger(1)
 
     @Volatile private var process: Process? = null
-    @Volatile private var initialized = false
+    @Volatile var initialized = false
+        private set
     private val pendingRequests = ConcurrentHashMap<Int, CompletableFuture<JsonObject>>()
     private var readerThread: Thread? = null
 

@@ -61,8 +61,12 @@ class ChatToolWindowContent(private val project: Project) {
             setupBridge()
             loadUI()
 
-            Thread { ProjectIndexer.warmUp(project); CodebaseGraph.build(project) }
-                .apply { isDaemon = true; name = "CoforgeWarmup" }.start()
+            Thread {
+                ProjectIndexer.warmUp(project)
+                CodebaseGraph.build(project)
+                // Start Dart LSP in background for Flutter projects (ready by first query)
+                if (isFlutter) DartLspService.getInstance(project).ensureStarted()
+            }.apply { isDaemon = true; name = "CoforgeWarmup" }.start()
         } else {
             browser      = null
             jsQuery      = null
